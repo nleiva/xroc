@@ -1,4 +1,4 @@
-# xroc: A collection of OpenConfig examples with Cisco IOS XR
+# A collection of OpenConfig examples with Cisco IOS XR
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -18,9 +18,9 @@ __Steps__
 1. Configure a Streaming Telemetry subscription using using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://github.com/nleiva/xrgrpc).
 2. Configure the Peer link (Interface) using using using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://github.com/nleiva/xrgrpc).
 3. Configure a BGP neighbor using using using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://github.com/nleiva/xrgrpc).
-4. Subscribe to the Telemetry stream to learn about BGP neighbor status with [xrgrpc](https://github.com/nleiva/xrgrpc.
+4. Subscribe to a Telemetry stream to learn about BGP Neighbor status with [xrgrpc](https://github.com/nleiva/xrgrpc).
 
-![oc-config-validate](https://github.com/nleiva/xroc/blob/gh-pages/ygot-bgp3.gif)
+  ![oc-config-validate](https://github.com/nleiva/xroc/blob/gh-pages/ygot-bgp3.gif)
 
 ## Tutorials
 - [Programming IOS-XR with gRPC and Go](https://xrdocs.github.io/programmability/tutorials/2017-08-04-programming-ios-xr-with-grpc-and-go/).
