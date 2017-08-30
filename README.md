@@ -2,7 +2,7 @@
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-The goal of this repo is to provide a set of examples that illustrate how to program network elements using [OpenConfig](http://www.openconfig.net/) and gRPC](https://grpc.io/). We will leverage different Open Source projects:
+The goal of this repo is to provide a set of examples that illustrate how to program network elements using [OpenConfig](http://www.openconfig.net/) and [gRPC](https://grpc.io/). We will leverage different Open Source projects:
 
 - [Go](https://github.com/golang/go) as the main programming language.
 - [xrgrpc](https://nleiva.github.io/xrgrpc/) (gRPC library for Cisco IOS XR) to interact with IOS XR via [gRPC](https://grpc.io/).
