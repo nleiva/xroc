@@ -2,7 +2,7 @@
 1. Configures a Streaming Telemetry subscription using an OpenConfig model template.
 2. Configures the Peer link (Interface) using ygot.
 3. Configures a BGP neighbor using ygot.
-4. Subscribes to the Telemetry stream to learn about BGP neighbor status.
+4. Subscribes to a Telemetry stream to learn about BGP neighbor status.
 
 Libraries:
 	xrgrpc -> https://nleiva.github.io/xrgrpc/
@@ -40,7 +40,7 @@ const (
 )
 
 func main() {
-	// Determine the ID for first the transaction.
+	// Determine the ID for the first RPC call.
 	ra := rand.New(rand.NewSource(time.Now().UnixNano()))
 	id := ra.Int63n(10000)
 
