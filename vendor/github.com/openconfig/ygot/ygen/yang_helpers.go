@@ -70,6 +70,11 @@ func isEnumType(t *yang.YangType) bool {
 	return t.Kind == yang.Yenum || t.Kind == yang.Yidentityref
 }
 
+// isAnydata returns true if the entry is an Anydata node.
+func isAnydata(e *yang.Entry) bool {
+	return e.Kind == yang.AnyDataEntry
+}
+
 // isOCCompressedValidElement returns true if the element would be output in the
 // compressed YANG code.
 func isOCCompressedValidElement(e *yang.Entry) bool {
@@ -133,10 +138,9 @@ func removePrefix(s string) string {
 	return strings.Split(s, ":")[1]
 }
 
-// parentModuleName returns the name of the module that defined the yang.Node
-// supplied as the node argument. If the discovered root node of the node is found
-// to be a submodule, the name of the parent module is returned.
-func parentModuleName(node yang.Node) string {
+// definingModule returns the name of the module that defined the yang.Node
+// supplied. If node is within a submodule, the parent module name is returned.
+func definingModule(node yang.Node) yang.Node {
 	var definingMod yang.Node
 	definingMod = yang.RootNode(node)
 	if definingMod.Kind() == "submodule" {
@@ -144,7 +148,21 @@ func parentModuleName(node yang.Node) string {
 		mod := definingMod.(*yang.Module)
 		definingMod = mod.BelongsTo
 	}
+	return definingMod
+}
 
+// parentModuleName returns the name of the module or submodule that defined
+// the supplied node.
+func parentModuleName(node yang.Node) string {
+	return definingModule(node).NName()
+}
+
+// parentModulePrettyName returns the name of the module that defined the yang.Node
+// supplied as the node argument. If the discovered root node of the node is found
+// to be a submodule, the name of the parent module is returned. If the root has
+// a camel case extension, this is returned rather than the actual module name.
+func parentModulePrettyName(node yang.Node) string {
+	definingMod := definingModule(node)
 	if name, ok := camelCaseNameExt(definingMod.Exts()); ok {
 		return name
 	}
@@ -196,6 +214,26 @@ func isConfig(e *yang.Entry) bool {
 	return true
 }
 
+// isKeyedList returns true if the supplied yang.Entry represents a keyed list.
+func isKeyedList(e *yang.Entry) bool {
+	return e.IsList() && e.Key != ""
+}
+
+// isSimpleEnumerationType returns true wen the type supplied is a simple
+// enumeration (i.e., a leaf that is defined as type enumeration { ... },
+// and is not a typedef that contains an enumeration, or a union that
+// contains an enumeration which may have enum values specified. The type
+// name enumeration is used in these cases by goyang.
+func isSimpleEnumerationType(t *yang.YangType) bool {
+	return t.Kind == yang.Yenum && t.Name == "enumeration"
+}
+
+// isIdentityrefLeaf returns true if the supplied yang.Entry represents an
+// identityref.
+func isIdentityrefLeaf(e *yang.Entry) bool {
+	return e.Type.IdentityBase != nil
+}
+
 // slicePathToString takes a path represented as a slice of strings, and outputs
 // it as a single string, with path elements separated by a forward slash.
 func slicePathToString(path []string) string {
@@ -245,11 +283,128 @@ func enumeratedUnionTypes(types []*yang.YangType) []*yang.YangType {
 	return eTypes
 }
 
-// appendIfNotEmpty appends a string s to a slice of strings if the string s is
-// not nil, similarly to append it returns the modified slice.
-func appendIfNotEmpty(slice []string, s string) []string {
-	if s != "" {
-		return append(slice, s)
+// addNewKeys appends entries from the newKeys string slice to the
+// existing map if the entry is not an existing key. The existing
+// map is modified in place.
+func addNewKeys(existing map[string]interface{}, newKeys []string) {
+	for _, n := range newKeys {
+		if _, ok := existing[n]; !ok {
+			existing[n] = true
+		}
 	}
-	return slice
+}
+
+// stringKeys returns the keys of the supplied map as a slice of strings.
+func stringKeys(m map[string]interface{}) []string {
+	var ss []string
+	for k := range m {
+		ss = append(ss, k)
+	}
+	return ss
+}
+
+// listKeyFieldsMap returns a map[string]bool where the keys of the map
+// are the fields that are the keys of the list described by the supplied
+// yang.Entry. In the case the yang.Entry does not described a keyed list,
+// an empty map is returned.
+func listKeyFieldsMap(e *yang.Entry) map[string]bool {
+	r := map[string]bool{}
+	for _, k := range strings.Split(e.Key, " ") {
+		r[k] = true
+	}
+	return r
+}
+
+// entrySchemaPath takes an input yang.Entry, and returns its YANG schema
+// path.
+func entrySchemaPath(e *yang.Entry) string {
+	return slicePathToString(append([]string{""}, traverseElementSchemaPath(e)[1:]...))
+}
+
+// isDirectEntryChild determines whether the entry c is a direct child of the
+// entry p within the output code. If compressPaths is set, a check to determine
+// whether c would be a direct child after schema compression is performed.
+func isDirectEntryChild(p, c *yang.Entry, compressPaths bool) bool {
+	ppp := strings.Split(p.Path(), "/")
+	cpp := strings.Split(c.Path(), "/")
+	dc := isPathChild(ppp, cpp)
+
+	// If we are not compressing paths, then directly return whether the child
+	// is a path of the parent.
+	if !compressPaths {
+		return dc
+	}
+
+	// If the length of the child path is greater than two larger than the
+	// parent path, then this means that it cannot be a direct child, since all
+	// path compression will remove only one level of hierarchy (config/state or
+	// a surrounding container at maximum). We also check that the length of
+	// the child path is more specific than or equal to the length of the parent
+	// path in which case this cannot be a child.
+	if len(cpp) > len(ppp)+2 || len(cpp) <= len(ppp) {
+		return false
+	}
+
+	if isConfigState(c.Parent) {
+		// If the parent of this entity was the config/state container, then this
+		// level of the hierarchy will have been removed so we check whether the
+		// parent of both are equal and return this.
+		return p.Path() == c.Parent.Parent.Path()
+	}
+
+	// If the child is a list, then we check whether the parent has only one
+	// child (i.e., is a surrounding container) and then check whether the
+	// single child is the child we were provided.
+	if c.IsList() {
+		ppe, ok := p.Dir[c.Parent.Name]
+		if !ok {
+			// Can't be a valid child because the parent of the entity doesn't exist
+			// within this container.
+			return false
+		}
+		if !hasOnlyChild(ppe) {
+			return false
+		}
+
+		// We are guaranteed to have 1 child (and not zero) since hasOnlyChild will
+		// return false for directories with 0 children.
+		return children(ppe)[0].Path() == c.Path()
+	}
+
+	return dc
+}
+
+// isPathChild takes an input slice of strings representing a path and determines
+// whether b is a child of a within the YANG schema.
+func isPathChild(a, b []string) bool {
+	// If b does not have a greater path length than a, it cannot be a child. If
+	// b has more than one element than a, it must be at least a grandchild.
+	if len(b) <= len(a) || len(b) > len(a)+1 {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// isChildOfModule determines whether the yangDirectory represents a container
+// or list member that is the direct child of a module entry.
+func isChildOfModule(msg *yangDirectory) bool {
+	if msg.isFakeRoot || len(msg.path) == 3 {
+		// If the message has a path length of 3, then it is a top-level entity
+		// within a module, since the  path is in the format []{"", <module>, <element>}.
+		return true
+	}
+	return false
+}
+
+// isYANGBaseType determines whether the supplied YangType is a built-in type
+// in YANG, or a derived type (i.e., typedef).
+func isYANGBaseType(t *yang.YangType) bool {
+	_, builtin := yang.TypeKindFromName[t.Name]
+	return builtin
 }

@@ -18,39 +18,80 @@ import (
 	"fmt"
 
 	"github.com/openconfig/goyang/pkg/yang"
-
+	"github.com/openconfig/ygot/util"
 	"github.com/openconfig/ygot/ygot"
 )
 
+// LeafrefOptions controls the behaviour of validation functions for leaf-ref
+// data types.
+type LeafrefOptions struct {
+	// IgnoreMissingData determines whether leafrefs that target a node
+	// that does not exist should return an error to the calling application. When
+	// set to true, no error is returned.
+	//
+	// This functionality is typically used where a partial set of schema information
+	// is populated, but validation is required - for example, configuration for
+	// a protocol within OpenConfig references an interface, but the schema being
+	// validated does not contain the interface definitions.
+	IgnoreMissingData bool
+	// Log specifies whether log entries should be created where a leafref
+	// cannot be successfully resolved.
+	Log bool
+}
+
+// IsValidationOption ensures that LeafrefOptions implements the ValidationOption
+// interface.
+func (*LeafrefOptions) IsValidationOption() {}
+
 // Validate recursively validates the value of the given data tree struct
 // against the given schema.
-func Validate(schema *yang.Entry, value interface{}) (errors Errors) {
+func Validate(schema *yang.Entry, value interface{}, opts ...ygot.ValidationOption) util.Errors {
 	// Nil value means the field is unset.
-	if isNil(value) {
+	if util.IsValueNil(value) {
 		return nil
 	}
 	if schema == nil {
-		return appendErr(errors, fmt.Errorf("nil schema for type %T, value %v", value, value))
+		return util.NewErrs(fmt.Errorf("nil schema for type %T, value %v", value, value))
 	}
-	dbgPrint("Validate with value %v, type %T, schema name %s", valueStr(value), value, schema.Name)
+
+	// TODO(robjs): Consider making this function a utility function when
+	// additional validation options are added here. Note that this code
+	// currently will accept multiple of the same option being specified,
+	// and overwrite with the last within the options slice, rather than
+	// explicitly returning an error.
+	var leafrefOpt *LeafrefOptions
+	for _, o := range opts {
+		switch o.(type) {
+		case *LeafrefOptions:
+			leafrefOpt = o.(*LeafrefOptions)
+		}
+	}
+
+	var errs util.Errors
+	if util.IsFakeRoot(schema) {
+		// Leafref validation traverses entire tree from the root. Do this only
+		// once from the fakeroot.
+		errs = ValidateLeafRefData(schema, value, leafrefOpt)
+	}
+
+	util.DbgPrint("Validate with value %v, type %T, schema name %s", util.ValueStr(value), value, schema.Name)
 
 	switch {
 	case schema.IsLeaf():
-		return validateLeaf(schema, value)
+		return util.AppendErrs(errs, validateLeaf(schema, value))
 	case schema.IsContainer():
 		gsv, ok := value.(ygot.GoStruct)
 		if !ok {
-			return appendErr(errors, fmt.Errorf("type %T is not a GoStruct for schema %s", value, schema.Name))
+			return util.AppendErr(errs, fmt.Errorf("type %T is not a GoStruct for schema %s", value, schema.Name))
 		}
-		errors = validateContainer(schema, gsv)
+		return util.AppendErrs(errs, validateContainer(schema, gsv))
 	case schema.IsLeafList():
-		return validateLeafList(schema, value)
+		return util.AppendErrs(errs, validateLeafList(schema, value))
 	case schema.IsList():
-		return validateList(schema, value)
+		return util.AppendErrs(errs, validateList(schema, value))
 	case schema.IsChoice():
-		return appendErr(errors, fmt.Errorf("cannot pass choice schema %s to Validate", schema.Name))
-	default:
-		errors = appendErr(errors, fmt.Errorf("unknown schema type for type %T, value %v", value, value))
+		return util.AppendErrs(errs, util.NewErrs(fmt.Errorf("cannot pass choice schema %s to Validate", schema.Name)))
 	}
-	return errors
+
+	return util.AppendErrs(errs, util.NewErrs(fmt.Errorf("unknown schema type for type %T, value %v", value, value)))
 }

@@ -20,7 +20,6 @@ import (
 
 	oc "github.com/openconfig/ygot/demo/getting_started/pkg/ocdemo"
 	"github.com/openconfig/ygot/ygot"
-	"github.com/openconfig/ygot/ytypes"
 )
 
 // The following generation rule uses the generator binary to create the
@@ -119,10 +118,7 @@ func main() {
 	if err := invalidIf.Validate(); err == nil {
 		panic(fmt.Sprintf("Did not find invalid address, got nil err: %v", err))
 	} else {
-		errs := err.(ytypes.Errors)
-		for _, err := range errs {
-			fmt.Printf("Got expected error: %v\n", err)
-		}
+		fmt.Printf("Got expected error: %v\n", err)
 	}
 
 	// We can also validate the device overall.
@@ -143,4 +139,11 @@ func main() {
 		panic(fmt.Sprintf("JSON demo error: %v", err))
 	}
 	fmt.Println(json)
+
+	// The generated code includes an Unmarshal function, which can be used to load
+	// a data tree such as the one that we just created.
+	loadd := &oc.Device{}
+	if err := oc.Unmarshal([]byte(json), loadd); err != nil {
+		panic(fmt.Sprintf("Can't unmarshal JSON: %v", err))
+	}
 }

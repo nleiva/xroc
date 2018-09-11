@@ -1,7 +1,16 @@
 {
-   "info": {
-      "config": {
-         "device-id": "rtr02.pop44"
+   "components": {
+      "component": {
+         "os": {
+            "config": {
+               "name": "os"
+            },
+            "name": "os",
+            "state": {
+               "description": "RouterOS 14.0",
+               "type": "OPERATING_SYSTEM"
+            }
+         }
       }
    },
    "interfaces": {
@@ -43,6 +52,16 @@
                }
             }
          }
+      }
+   },
+   "system": {
+      "config": {
+         "@hostname": [
+            {
+               "cfg-source": "devicedemo"
+            }
+         ],
+         "hostname": "rtr02.pop44"
       }
    }
 }

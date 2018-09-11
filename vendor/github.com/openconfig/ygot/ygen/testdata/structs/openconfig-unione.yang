@@ -20,6 +20,31 @@ module openconfig-unione {
     }
   }
 
+  typedef enumtypedef {
+    type union {
+      type string;
+      type uint32;
+    }
+  }
+
+  container dup-enum {
+    container state {
+      leaf A {
+        type enumeration {
+          enum A_A;
+          enum A_B;
+        }
+      }
+
+      leaf B {
+        type enumeration {
+          enum B_A;
+          enum B_B;
+        }
+      }
+    }
+  }
+
   container platform {
     container component {
       container state {
@@ -44,6 +69,10 @@ module openconfig-unione {
         leaf enumerated {
           type enumerated-union-type;
         }
+
+        // Checks that the union is not output twice.
+        leaf e1 { type enumtypedef; }
+        leaf r1 { type leafref { path "../e1"; } }
       }
     }
   }

@@ -19,6 +19,7 @@ import (
 	"reflect"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/openconfig/ygot/util"
 	"github.com/openconfig/ygot/ygot"
 )
 
@@ -27,16 +28,17 @@ import (
 // validateLeafList validates each of the values in value against the given
 // schema. value is expected to be a slice of the Go type corresponding to the
 // YANG type in the schema.
-func validateLeafList(schema *yang.Entry, value interface{}) (errors []error) {
-	if isNil(value) {
+func validateLeafList(schema *yang.Entry, value interface{}) util.Errors {
+	var errors []error
+	if util.IsValueNil(value) {
 		return nil
 	}
 	// Check that the schema itself is valid.
 	if err := validateLeafListSchema(schema); err != nil {
-		return appendErr(errors, err)
+		return util.NewErrs(err)
 	}
 
-	dbgPrint("validateLeafList with value %v, type %T, schema name %s", valueStr(value), value, schema.Name)
+	util.DbgPrint("validateLeafList with value %v, type %T, schema name %s", util.ValueStr(value), value, schema.Name)
 
 	switch reflect.TypeOf(value).Kind() {
 	case reflect.Slice:
@@ -47,17 +49,17 @@ func validateLeafList(schema *yang.Entry, value interface{}) (errors []error) {
 			// Handle the case that this is a leaf-list of enumerated values, where we expect that the
 			// input to validateLeaf is a scalar value, rather than a pointer.
 			if _, ok := cv.(ygot.GoEnum); ok {
-				errors = appendErrs(errors, validateLeaf(schema, cv))
+				errors = util.AppendErrs(errors, validateLeaf(schema, cv))
 			} else {
-				errors = appendErrs(errors, validateLeaf(schema, &cv))
+				errors = util.AppendErrs(errors, validateLeaf(schema, &cv))
 			}
 
 		}
 	default:
-		errors = appendErr(errors, fmt.Errorf("expected slice type for %s, got %T", schema.Name, value))
+		errors = util.AppendErr(errors, fmt.Errorf("expected slice type for %s, got %T", schema.Name, value))
 	}
 
-	return
+	return errors
 }
 
 // validateLeafListSchema validates the given list type schema. This is a sanity
@@ -70,6 +72,44 @@ func validateLeafListSchema(schema *yang.Entry) error {
 	}
 	if !schema.IsLeafList() {
 		return fmt.Errorf("schema for %s with type %v is not leaf list type", schema.Name, schema.Kind)
+	}
+
+	if schema.Type.Kind == yang.Yempty {
+		return fmt.Errorf("schema for %s contains leaf-list of empty type, invalid YANG", schema.Name)
+	}
+
+	return nil
+}
+
+// unmarshalLeafList unmarshals a JSON leaf list slice into a Go slice parent.
+//   schema is the schema of the schema node corresponding to the field being
+//     unmamshaled into
+//   value is a JSON array, represented as Go slice
+func unmarshalLeafList(schema *yang.Entry, parent interface{}, value interface{}) error {
+	if util.IsValueNil(value) {
+		return nil
+	}
+	// Check that the schema itself is valid.
+	if err := validateLeafListSchema(schema); err != nil {
+		return err
+	}
+
+	util.DbgPrint("unmarshalLeafList value %v, type %T, into parent type %T, schema name %s", util.ValueStr(value), value, parent, schema.Name)
+
+	leafList, ok := value.([]interface{})
+	if !ok {
+		return fmt.Errorf("unmarshalLeafList for schema %s: value %v: got type %T, expect []interface{}",
+			schema.Name, util.ValueStr(value), value)
+	}
+
+	// The leaf schema is just the leaf-list schema without the list attrs.
+	leafSchema := *schema
+	leafSchema.ListAttr = nil
+
+	for _, leaf := range leafList {
+		if err := Unmarshal(&leafSchema, parent, leaf); err != nil {
+			return err
+		}
 	}
 
 	return nil

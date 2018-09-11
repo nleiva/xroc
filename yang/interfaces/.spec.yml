@@ -1,0 +1,22 @@
+- name: openconfig-interfaces
+  docs:
+    - yang/interfaces/openconfig-interfaces.yang
+    - yang/interfaces/openconfig-if-ip.yang
+    - yang/interfaces/openconfig-if-aggregate.yang
+    - yang/interfaces/openconfig-if-ethernet.yang
+    - yang/interfaces/openconfig-if-ethernet-ext.yang
+    - yang/interfaces/openconfig-if-poe.yang
+    - yang/interfaces/openconfig-if-ip-ext.yang
+    - yang/vlan/openconfig-vlan.yang
+    - yang/interfaces/openconfig-if-tunnel.yang
+  build:
+    - yang/interfaces/openconfig-interfaces.yang
+    - yang/interfaces/openconfig-if-ip.yang
+    - yang/interfaces/openconfig-if-aggregate.yang
+    - yang/interfaces/openconfig-if-ethernet.yang
+    - yang/interfaces/openconfig-if-ethernet-ext.yang
+    - yang/interfaces/openconfig-if-poe.yang
+    - yang/interfaces/openconfig-if-ip-ext.yang
+    - yang/vlan/openconfig-vlan.yang
+    - yang/interfaces/openconfig-if-tunnel.yang
+  run-ci: true

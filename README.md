@@ -10,9 +10,21 @@ The goal of this repo is to provide a set of examples that illustrate how to pro
 
 ## Examples
 
-### Configuring and Validating BGP Peer session
+### Interface Configuration
 
-The objective is to configure an interface (link) and bring up a BGP session, while setting up a BGP Neighbor Telemetry stream to track the current state of the BGP Finite State Machine. Check out the code [here](example/ipv6/bgp/main.go)
+- [OpenConfig interface](example/ipv6/interface/README.md)
+
+### Telemetry Stream Configuration
+
+- [OpenConfig telemetry](example/ipv6/telemetry/README.md)
+
+### BGP Neighbor Configuration
+
+- [OpenConfig Network Instance: BGP](example/ipv6/bgp/README.md)
+
+### Configuring and Validating a BGP Peer session
+
+The objective is to configure an interface (link) and bring up a BGP session, while setting up a BGP Neighbor Telemetry stream to track the current state of the BGP Finite State Machine. Check out the code [here](example/ipv6/closeloop/main.go)
 
 __Steps__
 1. Configure a Streaming Telemetry subscription using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
@@ -21,9 +33,10 @@ __Steps__
 4. Subscribe to a Telemetry stream to learn about BGP Neighbor status with [xrgrpc](https://nleiva.github.io/xrgrpc/).
 
 
-   ![oc-config-validate](https://github.com/nleiva/xroc/blob/gh-pages/ygot-bgp3.gif)
+   ![oc-config-validate](static/images/closeloop.svg)
 
 
 ## Tutorials
 - [Programming IOS-XR with gRPC and Go](https://xrdocs.github.io/programmability/tutorials/2017-08-04-programming-ios-xr-with-grpc-and-go/).
 - [Validate the intent of network config changes](https://xrdocs.github.io/programmability/tutorials/2017-08-14-validate-the-intent-of-network-config-changes/).
+- [Programming Network Devices with gRPC and OpenConfig](https://goo.gl/P9Zsvj)

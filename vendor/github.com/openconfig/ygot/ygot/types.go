@@ -14,6 +14,8 @@
 
 package ygot
 
+import "reflect"
+
 // GoStruct is an interface which can be implemented by Go structs that are
 // generated to represent a YANG container or list member. It simply allows
 // handling code to ensure that it is interacting with a struct that will meet
@@ -30,11 +32,35 @@ type GoStruct interface {
 // that are generated to represent a YANG container or list member that have
 // the corresponding function to be validated against the a YANG schema.
 type ValidatedGoStruct interface {
-	GoStruct // Embed GoStruct since a ValidatedGoStruct must be a GoStruct.
+	// GoStruct ensures that the interface for a standard GoStruct
+	// is embedded.
+	GoStruct
 	// Validate compares the contents of the implementing struct against
 	// the YANG schema, and returns an error if the struct's contents
 	// are not valid, or nil if the struct complies with the schema.
-	Validate() error
+	Validate(...ValidationOption) error
+	// ΛEnumTypeMap returns the set of enumerated types that are contained
+	// in the generated code.
+	ΛEnumTypeMap() map[string][]reflect.Type
+}
+
+// ValidationOption is an interface that is implemented for each struct
+// which presents configuration parameters for validation options through the
+// Validate public API.
+type ValidationOption interface {
+	IsValidationOption()
+}
+
+// KeyHelperGoStruct is an interface which can be implemented by Go structs
+// that are generated to represent a YANG container or list member that has
+// the corresponding function to retrieve the list keys as a map.
+type KeyHelperGoStruct interface {
+	// GoStruct ensures that the interface for a standard GoStruct
+	// is embedded.
+	GoStruct
+	// ΛListKeyMap defines a helper method that returns a map of the
+	// keys of a list element.
+	ΛListKeyMap() (map[string]interface{}, error)
 }
 
 // GoEnum is an interface which can be implemented by derived types which
@@ -65,4 +91,30 @@ type EnumDefinition struct {
 	// DefiningModule specifies the module within which the enumeration was
 	// defined. Only populated for identity values.
 	DefiningModule string
+}
+
+// Annotation defines an interface that is implemented by optional metadata
+// fields within a GoStruct. Annotations are stored within each struct, and
+// for a struct field, for example:
+//
+//  type GoStructExample struct {
+//     ΛMetadata []*ygot.Annotation `path:"@"`
+//     StringField *string `path:"string-field"`
+//     ΛStringField []*ygot.Annotation `path:"@string-field"`
+//  }
+//
+// The ΛMetadata and ΛStringField fields can be populated with a slice of
+// arbitrary types implementing the Annotation interface.
+//
+// Each Annotation must implement the MarshalJSON and UnmarshalJSON methods,
+// such that its content can be serialised and deserialised from JSON. Using
+// the approach described in RFC7952 can be used to store metadata within
+// RFC7951-serialised JSON.
+type Annotation interface {
+	// MarshalJSON is used to marshal the annotation to JSON. It ensures that
+	// the json.Marshaler interface is implemented.
+	MarshalJSON() ([]byte, error)
+	// UnmarshalJSON is used to unmarshal JSON into the Annotation. It ensures that
+	// the json.Unmarshaler interface is implemented.
+	UnmarshalJSON([]byte) error
 }

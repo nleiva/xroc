@@ -19,6 +19,7 @@ import (
 	"reflect"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/openconfig/ygot/util"
 	"github.com/openconfig/ygot/ygot"
 )
 
@@ -28,10 +29,10 @@ import (
 // the given schema. It ensures that fields from only one case are selected from
 // the available set. Since a case may contain choice elements that are not
 // named in the data tree, the function recurses until it reaches a named
-// element in such cases. Returns all the field names that were selected in the
-// data tree from the Choice schema.
+// element in such cases. It returns all the field names that were selected in
+// the data tree from the Choice schema.
 func validateChoice(schema *yang.Entry, structValue ygot.GoStruct) (selected []string, errors []error) {
-	dbgPrint("validateChoice with value %s, schema name %s\n", valueStr(structValue), schema.Name)
+	util.DbgPrint("validateChoice with value %s, schema name %s\n", util.ValueStr(structValue), schema.Name)
 	// Validate that multiple cases are not selected. Since choice is always
 	// inside a container, there's no need to validate each individual field
 	// since that is part of container validation.
@@ -39,14 +40,14 @@ func validateChoice(schema *yang.Entry, structValue ygot.GoStruct) (selected []s
 	for _, caseSchema := range schema.Dir {
 		sel, errs := IsCaseSelected(caseSchema, structValue)
 		selected = append(selected, sel...)
-		errors = appendErrs(errors, errs)
+		errors = util.AppendErrs(errors, errs)
 		if len(sel) > 0 {
 			selectedCases = append(selectedCases, caseSchema.Name)
 		}
 	}
 
 	if len(selectedCases) > 1 {
-		errors = appendErr(errors, fmt.Errorf("multiple cases %v selected for choice %s", selectedCases, schema.Name))
+		errors = util.AppendErr(errors, fmt.Errorf("multiple cases %v selected for choice %s", selectedCases, schema.Name))
 	}
 
 	return
@@ -55,8 +56,8 @@ func validateChoice(schema *yang.Entry, structValue ygot.GoStruct) (selected []s
 // IsCaseSelected reports whether a case with the given schema has been selected
 // in the given value struct. The top level of the struct is checked, and any
 // choices present in the schema are recursively followed to determine whether
-// any case is selected for that choice schema subtree. Returns a slice with the
-// names of all fields in the case that were selected.
+// any case is selected for that choice schema subtree. It returns a slice with
+// the names of all fields in the case that were selected.
 func IsCaseSelected(schema *yang.Entry, value interface{}) (selected []string, errors []error) {
 	v := reflect.ValueOf(value).Elem()
 	for i := 0; i < v.NumField(); i++ {
@@ -64,7 +65,7 @@ func IsCaseSelected(schema *yang.Entry, value interface{}) (selected []string, e
 			fieldType := v.Type().Field(i)
 			cs, err := childSchema(schema, fieldType)
 			if err != nil {
-				errors = appendErr(errors, err)
+				errors = util.AppendErr(errors, err)
 				continue
 			}
 			if cs != nil {

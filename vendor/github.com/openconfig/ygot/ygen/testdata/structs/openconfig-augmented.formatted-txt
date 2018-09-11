@@ -13,7 +13,9 @@ Imported modules were sourced from:
 package ocstructs
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/openconfig/ygot/ygot"
 )
@@ -24,10 +26,15 @@ import (
 // []byte in reflection).
 type Binary []byte
 
+// YANGEmpty is a type that is used for fields that have a YANG type of
+// empty. It is used such that empty fields can be distinguished from boolean fields
+// in the generated code.
+type YANGEmpty bool
+
 // Device represents the /device YANG schema element.
 type Device struct {
-	Native	*Native	`path:"" rootname:"native" module:"openconfig-simple-target"`
-	Target	*Target	`path:"" rootname:"target" module:"openconfig-simple-target"`
+	Native	*Native	`path:"native" module:"openconfig-simple-target"`
+	Target	*Target	`path:"target" module:"openconfig-simple-target"`
 }
 
 // IsYANGGoStruct ensures that Device implements the yang.GoStruct
@@ -37,7 +44,7 @@ func (*Device) IsYANGGoStruct() {}
 
 // Native represents the /openconfig-simple-target/native YANG schema element.
 type Native struct {
-	A	*string	`path:"native/config/a" module:"openconfig-simple-target"`
+	A	*string	`path:"config/a" module:"openconfig-simple-target"`
 }
 
 // IsYANGGoStruct ensures that Native implements the yang.GoStruct
@@ -47,7 +54,7 @@ func (*Native) IsYANGGoStruct() {}
 
 // Target represents the /openconfig-simple-target/target YANG schema element.
 type Target struct {
-	Foo	*Target_Foo	`path:"target/foo" module:"openconfig-simple-augment"`
+	Foo	*Target_Foo	`path:"foo" module:"openconfig-simple-augment"`
 }
 
 // IsYANGGoStruct ensures that Target implements the yang.GoStruct

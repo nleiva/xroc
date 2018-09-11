@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/openconfig/ygot/util"
 )
 
 var validStringSchema = yrangeAndPatternToStringSchema("valid-string-schema", yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)}, nil)
@@ -53,12 +54,14 @@ func TestValidateStringSchema(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateStringSchema(test.schema)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: validateStringSchema(%v) got error: %v, wanted error? %v", test.desc, test.schema, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateStringSchema(tt.schema)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: validateStringSchema(%v) got error: %v, want error? %v", tt.desc, tt.schema, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
 
@@ -77,19 +80,19 @@ func TestValidateStringSchemaRanges(t *testing.T) {
 		},
 		{
 			desc:       "unset min success",
-			length:     yang.YRange{Min: YangMinNumber, Max: yang.FromInt(10)},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: yang.FromInt(10)},
 			schemaName: "range-10-or-less",
 			re:         []string{`ab.`, `.*bc`},
 		},
 		{
 			desc:       "unset max success",
-			length:     yang.YRange{Min: yang.FromInt(2), Max: YangMaxNumber},
+			length:     yang.YRange{Min: yang.FromInt(2), Max: util.YangMaxNumber},
 			schemaName: "range-2-or-more",
 			re:         []string{`ab.`, `.*bc`},
 		},
 		{
 			desc:       "unset min and max success",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`ab.`, `.*bc`},
 		},
@@ -101,13 +104,13 @@ func TestValidateStringSchemaRanges(t *testing.T) {
 		},
 		{
 			desc:       "negative min length",
-			length:     yang.YRange{Min: yang.FromInt(-1), Max: YangMaxNumber},
+			length:     yang.YRange{Min: yang.FromInt(-1), Max: util.YangMaxNumber},
 			schemaName: "bad-range-negative-min",
 			wantErr:    true,
 		},
 		{
 			desc:       "negative max length",
-			length:     yang.YRange{Min: YangMinNumber, Max: yang.FromInt(-1)},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: yang.FromInt(-1)},
 			schemaName: "bad-range-negative-max",
 			wantErr:    true,
 		},
@@ -120,12 +123,14 @@ func TestValidateStringSchemaRanges(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateStringSchema(yrangeAndPatternToStringSchema(test.schemaName, test.length, test.re))
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: validateStringSchema got error: %v, wanted error? %v", test.desc, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateStringSchema(yrangeAndPatternToStringSchema(tt.schemaName, tt.length, tt.re))
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: validateStringSchema got error: %v, want error? %v", tt.desc, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
 
@@ -146,6 +151,14 @@ func TestValidateString(t *testing.T) {
 			val:        "abc",
 		},
 		{
+			desc:       "logical expression",
+			length:     yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)},
+			schemaName: "range-2-to-10",
+			re:         []string{`a+|\.`},
+			val:        "aaa aaa",
+			wantErr:    true,
+		},
+		{
 			desc:       "bad schema",
 			length:     yang.YRange{Min: yang.FromInt(20), Max: yang.FromInt(10)},
 			schemaName: "bad-range",
@@ -154,7 +167,7 @@ func TestValidateString(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			desc:       "regular expression pattern matching failure",
+			desc:       "regex failure",
 			length:     yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)},
 			schemaName: "range-2-to-10",
 			re:         []string{`ab.`, `.*bc`},
@@ -162,7 +175,22 @@ func TestValidateString(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			desc:       "regular expression pattern matching failure with derived type name",
+			desc:       "repeating regex success",
+			length:     yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)},
+			schemaName: "range-2-to-10",
+			re:         []string{`[a|b]*`},
+			val:        "abbbab",
+		},
+		{
+			desc:       "repeating regex failure",
+			length:     yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)},
+			schemaName: "range-2-to-10",
+			re:         []string{`[a|b]*`},
+			val:        "abbcbab",
+			wantErr:    true,
+		},
+		{
+			desc:       "regex failure with derived type name",
 			length:     yang.YRange{Min: yang.FromInt(2), Max: yang.FromInt(10)},
 			schemaName: "range-2-to-10",
 			re:         []string{`ab.`, `.*bc`},
@@ -171,7 +199,7 @@ func TestValidateString(t *testing.T) {
 		},
 		{
 			desc:       "non string type",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			val:        int64(123),
 			wantErr:    true,
@@ -185,21 +213,21 @@ func TestValidateString(t *testing.T) {
 		},
 		{
 			desc:       "short string",
-			length:     yang.YRange{Min: yang.FromInt(20), Max: YangMaxNumber},
+			length:     yang.YRange{Min: yang.FromInt(20), Max: util.YangMaxNumber},
 			schemaName: "range-20-or-more",
 			val:        "short_value",
 			wantErr:    true,
 		},
 		{
 			desc:       "regular expression matching with no anchors OK",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[ab]{2}([cd])?`},
 			val:        "abc",
 		},
 		{
 			desc:       "regular expression matching with no anchors failure",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[ab]{2}([cd])?`},
 			val:        "cdb",
@@ -207,7 +235,7 @@ func TestValidateString(t *testing.T) {
 		},
 		{
 			desc:       "unanchored regular expression does not match",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[0-9]+`},
 			val:        "abcd999",
@@ -215,42 +243,42 @@ func TestValidateString(t *testing.T) {
 		},
 		{
 			desc:       "regular expression matching with anchors",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`^[ab]{2}([cd])?$`},
 			val:        "aad",
 		},
 		{
 			desc:       "regular expression matching with embedded $",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`$[0-9]+`},
 			val:        "$100",
 		},
 		{
 			desc:       "regular expression matching with embedded ^",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[a-z]+^`},
 			val:        "caret^",
 		},
 		{
 			desc:       "regular expression matching with escape chars",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[0-9]+\.[0-9]+`},
 			val:        "10.10",
 		},
 		{
 			desc:       "regular expression with escaped escapes",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`foo\\^bar`},
 			val:        `foo\^bar`,
 		},
 		{
 			desc:       "regular expression with set negation, valid",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[^:][0-9a-fA-F]+`},
 			val:        ":FFFF",
@@ -258,19 +286,21 @@ func TestValidateString(t *testing.T) {
 		},
 		{
 			desc:       "regular expression with set negation, invalid",
-			length:     yang.YRange{Min: YangMinNumber, Max: YangMaxNumber},
+			length:     yang.YRange{Min: util.YangMinNumber, Max: util.YangMaxNumber},
 			schemaName: "range-any",
 			re:         []string{`[^:][0-9a-fA-F]+`},
 			val:        "CAFE",
 		},
 	}
 
-	for _, test := range tests {
-		err := validateString(yrangeAndPatternToStringSchema(test.schemaName, test.length, test.re), test.val)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: s.validateString(%v) got error: %v, wanted error? %t", test.desc, test.val, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateString(yrangeAndPatternToStringSchema(tt.schemaName, tt.length, tt.re), tt.val)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: s.validateString(%v) got error: %v, want error? %t", tt.desc, tt.val, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
 
@@ -312,11 +342,13 @@ func TestValidateStringSlice(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateStringSlice(test.schema, test.val)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: s.validateStringSlice(%v) got error: %v, wanted error? %t", test.desc, test.val, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateStringSlice(tt.schema, tt.val)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: s.validateStringSlice(%v) got error: %v, want error? %t", tt.desc, tt.val, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }

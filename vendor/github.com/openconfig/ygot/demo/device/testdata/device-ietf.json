@@ -40,9 +40,28 @@
          }
       ]
    },
-   "openconfig-system-info:info": {
+   "openconfig-platform:components": {
+      "component": [
+         {
+            "config": {
+               "name": "os"
+            },
+            "name": "os",
+            "state": {
+               "description": "RouterOS 14.0",
+               "type": "openconfig-platform-types:OPERATING_SYSTEM"
+            }
+         }
+      ]
+   },
+   "openconfig-system:system": {
       "config": {
-         "device-id": "rtr02.pop44"
+         "@hostname": [
+            {
+               "cfg-source": "devicedemo"
+            }
+         ],
+         "hostname": "rtr02.pop44"
       }
    }
 }

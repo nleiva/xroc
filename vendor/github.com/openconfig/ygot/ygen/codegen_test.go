@@ -21,26 +21,32 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
 
+	"github.com/kylelemons/godebug/pretty"
+	"github.com/openconfig/gnmi/errdiff"
 	"github.com/openconfig/goyang/pkg/yang"
-
-	"github.com/pmezard/go-difflib/difflib"
+	"github.com/openconfig/ygot/testutil"
 )
 
 const (
 	// TestRoot is the root of the test directory such that this is not
 	// repeated when referencing files.
 	TestRoot string = ""
+	// deflakeRuns specifies the number of runs of code generation that
+	// should be performed to check for flakes.
+	deflakeRuns int = 10
 )
 
 // TestFindMappableEntities tests the extraction of elements that are to be mapped
 // into Go code from a YANG schema.
 func TestFindMappableEntities(t *testing.T) {
 	tests := []struct {
-		name          string      // name is an identifier for the test.
-		in            *yang.Entry // in is the yang.Entry corresponding to the YANG root element.
-		inSkipModules []string    // inSkipModules is a slice of strings indicating modules to be skipped.
+		name          string        // name is an identifier for the test.
+		in            *yang.Entry   // in is the yang.Entry corresponding to the YANG root element.
+		inSkipModules []string      // inSkipModules is a slice of strings indicating modules to be skipped.
+		inModules     []*yang.Entry // inModules is the set of modules that the code generation is for.
 		// wantCompressed is a map keyed by the string "structs" or "enums" which contains a slice
 		// of the YANG identifiers for the corresponding mappable entities that should be
 		// found. wantCompressed is the set that are expected when CompressOCPaths is set
@@ -53,16 +59,20 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "base-test",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"base": {
 					Name: "base",
+					Kind: yang.DirectoryEntry,
 					Dir: map[string]*yang.Entry{
 						"config": {
 							Name: "config",
+							Kind: yang.DirectoryEntry,
 							Dir:  map[string]*yang.Entry{},
 						},
 						"state": {
 							Name: "state",
+							Kind: yang.DirectoryEntry,
 							Dir:  map[string]*yang.Entry{},
 						},
 					},
@@ -84,9 +94,11 @@ func TestFindMappableEntities(t *testing.T) {
 			Dir: map[string]*yang.Entry{
 				"base": {
 					Name: "base",
+					Kind: yang.DirectoryEntry,
 					Dir: map[string]*yang.Entry{
 						"config": {
 							Name: "config",
+							Kind: yang.DirectoryEntry,
 							Dir: map[string]*yang.Entry{
 								"enumleaf": {
 									Name: "enumleaf",
@@ -98,6 +110,7 @@ func TestFindMappableEntities(t *testing.T) {
 						},
 						"state": {
 							Name: "state",
+							Kind: yang.DirectoryEntry,
 							Dir: map[string]*yang.Entry{
 								"enumleaf": {
 									Name: "enumleaf",
@@ -123,14 +136,37 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "skip module",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"ignored-container": {
 					Name: "ignored-container",
+					Kind: yang.DirectoryEntry,
 					Dir:  map[string]*yang.Entry{},
+					Node: &yang.Container{
+						Name: "ignored-container",
+						Parent: &yang.Module{
+							Namespace: &yang.Value{
+								Name: "module-namespace",
+							},
+						},
+					},
+				},
+			},
+			Node: &yang.Module{
+				Namespace: &yang.Value{
+					Name: "module-namespace",
 				},
 			},
 		},
 		inSkipModules: []string{"module"},
+		inModules: []*yang.Entry{{
+			Name: "module",
+			Node: &yang.Module{
+				Namespace: &yang.Value{
+					Name: "module-namespace",
+				},
+			},
+		}},
 		wantCompressed: map[string][]string{
 			"structs": {},
 			"enums":   {},
@@ -143,12 +179,15 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "surrounding container for list at root",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"surrounding-container": {
 					Name: "surrounding-container",
+					Kind: yang.DirectoryEntry,
 					Dir: map[string]*yang.Entry{
 						"child-list": {
 							Name:     "child-list",
+							Kind:     yang.DirectoryEntry,
 							Dir:      map[string]*yang.Entry{},
 							ListAttr: &yang.ListAttr{},
 						},
@@ -177,6 +216,7 @@ func TestFindMappableEntities(t *testing.T) {
 							Dir: map[string]*yang.Entry{
 								"container": {
 									Name: "container",
+									Kind: yang.DirectoryEntry,
 									Dir:  map[string]*yang.Entry{},
 								},
 							},
@@ -195,6 +235,7 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "enumerated value within a union leaf",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"leaf": {
 					Name: "leaf",
@@ -213,6 +254,7 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "identityref value within a union leaf",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"leaf": {
 					Name: "leaf",
@@ -233,6 +275,7 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "enumeration within a typedef which is a union",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"leaf": {
 					Name: "leaf",
@@ -253,6 +296,7 @@ func TestFindMappableEntities(t *testing.T) {
 		name: "enumerated value within a choice that has a child",
 		in: &yang.Entry{
 			Name: "module",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"choice": {
 					Name: "choice",
@@ -264,6 +308,7 @@ func TestFindMappableEntities(t *testing.T) {
 							Dir: map[string]*yang.Entry{
 								"container": {
 									Name: "container",
+									Kind: yang.DirectoryEntry,
 									Dir: map[string]*yang.Entry{
 										"choice-case-container-leaf": {
 											Name: "choice-case-container-leaf",
@@ -291,8 +336,12 @@ func TestFindMappableEntities(t *testing.T) {
 				},
 			},
 		},
-		wantCompressed:   map[string][]string{"enums": {"choice-case-container-leaf", "choice-case2-leaf", "direct"}},
-		wantUncompressed: map[string][]string{"enums": {"choice-case-container-leaf", "choice-case2-leaf", "direct"}},
+		wantCompressed: map[string][]string{
+			"structs": {"container"},
+			"enums":   {"choice-case-container-leaf", "choice-case2-leaf", "direct"}},
+		wantUncompressed: map[string][]string{
+			"structs": {"container"},
+			"enums":   {"choice-case-container-leaf", "choice-case2-leaf", "direct"}},
 	}}
 
 	for _, tt := range tests {
@@ -305,12 +354,18 @@ func TestFindMappableEntities(t *testing.T) {
 			structs := make(map[string]*yang.Entry)
 			enums := make(map[string]*yang.Entry)
 
-			cg := NewYANGCodeGenerator(&GeneratorConfig{
-				CompressOCPaths: compress,
-				ExcludeModules:  tt.inSkipModules,
-			})
+			errs := findMappableEntities(tt.in, structs, enums, tt.inSkipModules, compress, tt.inModules)
+			if errs != nil {
+				t.Errorf("%s: findMappableEntities(CompressOCPaths: %v): got unexpected error, got: %v, want: nil", tt.name, compress, errs)
+			}
 
-			cg.findMappableEntities(tt.in, structs, enums)
+			entityNames := func(m map[string]bool) []string {
+				o := []string{}
+				for k := range m {
+					o = append(o, k)
+				}
+				return o
+			}
 
 			structOut := make(map[string]bool)
 			enumOut := make(map[string]bool)
@@ -321,641 +376,23 @@ func TestFindMappableEntities(t *testing.T) {
 				enumOut[e.Name] = true
 			}
 
+			if len(expected["structs"]) != len(structOut) {
+				t.Errorf("%s: findMappableEntities(CompressOCPaths: %v): did not get expected number of structs, got: %v, want: %v", tt.name, compress, entityNames(structOut), expected["structs"])
+			}
+
 			for _, e := range expected["structs"] {
 				if !structOut[e] {
-					t.Errorf("%s findMappableEntities(CompressOCPaths: %v): struct %s was not found in %v\n", tt.name, compress, e, structOut)
+					t.Errorf("%s: findMappableEntities(CompressOCPaths: %v): struct %s was not found in %v\n", tt.name, compress, e, structOut)
 				}
+			}
+
+			if len(expected["enums"]) != len(enumOut) {
+				t.Errorf("%s: findMappableEntities(CompressOCPaths: %v): did not get expected number of enums, got: %v, want: %v", tt.name, compress, entityNames(enumOut), expected["enums"])
 			}
 
 			for _, e := range expected["enums"] {
 				if !enumOut[e] {
-					t.Errorf("%s findMappableEntities(CompressOCPaths: %v): enum %s was not found in %v\n", tt.name, compress, e, enumOut)
-				}
-			}
-		}
-	}
-}
-
-// TestBuildStructDefinitions tests the struct definition builder to ensure that the relevant
-// entities are extracted from the input YANG.
-func TestBuildStructDefinitions(t *testing.T) {
-	tests := []struct {
-		name           string
-		in             []*yang.Entry
-		wantCompress   map[string]yangStruct
-		wantUncompress map[string]yangStruct
-	}{{
-		name: "basic struct generation test",
-		in: []*yang.Entry{
-			{
-				Name: "module",
-				Dir: map[string]*yang.Entry{
-					"s1": {
-						Name: "s1",
-						Dir: map[string]*yang.Entry{
-							"config": {
-								Name:   "config",
-								Parent: &yang.Entry{Name: "s1"},
-								Dir: map[string]*yang.Entry{
-									"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-									"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-								},
-							},
-							"state": {
-								Name:   "state",
-								Parent: &yang.Entry{Name: "s1"},
-								Dir: map[string]*yang.Entry{
-									"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Yint8}}, // Deliberate type mismatch
-									"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-									"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		wantCompress: map[string]yangStruct{
-			"/s1": {
-				name: "s1",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-				},
-				path: []string{"", "s1"},
-			},
-		},
-		wantUncompress: map[string]yangStruct{
-			"/s1": {
-				name: "s1",
-				path: []string{"", "s1"},
-			},
-			"/s1/config": {
-				name: "config",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "s1", "config"},
-			},
-			"/s1/state": {
-				name: "state",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-				},
-				path: []string{"", "s1", "state"},
-			},
-		},
-	}, {
-		name: "nested container struct generation test",
-		in: []*yang.Entry{
-			{
-				Name: "module",
-				Dir: map[string]*yang.Entry{
-					"s1": {
-						Name: "s1",
-						Dir: map[string]*yang.Entry{
-							"config": {
-								Name:   "config",
-								Parent: &yang.Entry{Name: "s1"},
-								Dir: map[string]*yang.Entry{
-									"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-									"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-								},
-							},
-							"state": {
-								Name:   "state",
-								Parent: &yang.Entry{Name: "s1"},
-								Dir: map[string]*yang.Entry{
-									"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Yint8}}, // Deliberate type mismatch
-									"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-									"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-								},
-							},
-							"outer-container": {
-								Name:   "outer-container",
-								Parent: &yang.Entry{Name: "s1"},
-								Dir: map[string]*yang.Entry{
-									"inner-container": {
-										Name:   "inner-container",
-										Parent: &yang.Entry{Name: "outer-container", Parent: &yang.Entry{Name: "s1"}},
-										Dir: map[string]*yang.Entry{
-											"config": {
-												Name: "config",
-												Parent: &yang.Entry{
-													Name:   "inner-container",
-													Parent: &yang.Entry{Name: "outer-container", Parent: &yang.Entry{Name: "s1"}},
-												},
-												Dir: map[string]*yang.Entry{
-													"inner-leaf": {Name: "inner-leaf", Type: &yang.YangType{Kind: yang.Ystring}},
-												},
-											},
-											"state": {
-												Name: "state",
-												Parent: &yang.Entry{
-													Name:   "inner-container",
-													Parent: &yang.Entry{Name: "outer-container", Parent: &yang.Entry{Name: "s1"}},
-												},
-												Dir: map[string]*yang.Entry{
-													"inner-leaf":       {Name: "inner-leaf", Type: &yang.YangType{Kind: yang.Ystring}},
-													"inner-state-leaf": {Name: "inner-state-leaf", Type: &yang.YangType{Kind: yang.Yint8}},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		wantCompress: map[string]yangStruct{
-			"/s1": {
-				name: "s1",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-				},
-				path: []string{"", "s1"},
-			},
-			"/s1/outer-container": {
-				name: "outer-container",
-				fields: map[string]*yang.Entry{
-					"inner-container": {Name: "inner-container"},
-				},
-				path: []string{"", "s1", "outer-container"},
-			},
-			"/s1/outer-container/inner-container": {
-				name: "inner-container",
-				fields: map[string]*yang.Entry{
-					"inner-leaf":       {Name: "inner-leaf", Type: &yang.YangType{Kind: yang.Ystring}},
-					"inner-state-leaf": {Name: "inner-state-leaf", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "s1", "outer-container", "inner-container"},
-			},
-		},
-		wantUncompress: map[string]yangStruct{
-			"/s1": {
-				name: "s1",
-				fields: map[string]*yang.Entry{
-					"config":          {Name: "config"},
-					"state":           {Name: "state"},
-					"outer-container": {Name: "outer-container"},
-				},
-				path: []string{"", "s1"},
-			},
-			"/s1/config": {
-				name: "config",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Ystring}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "s1", "config"},
-			},
-			"/s1/state": {
-				name: "state",
-				fields: map[string]*yang.Entry{
-					"l1": {Name: "l1", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l2": {Name: "l2", Type: &yang.YangType{Kind: yang.Yint8}},
-					"l3": {Name: "l3", Type: &yang.YangType{Kind: yang.Yint32}},
-				},
-				path: []string{"", "s1", "state"},
-			},
-			"/s1/outer-container": {
-				name:   "outer-container",
-				fields: map[string]*yang.Entry{"inner-container": {Name: "inner-container"}},
-				path:   []string{"", "s1", "outer-container"},
-			},
-			"/s1/outer-container/inner-container": {
-				name: "inner-container",
-				fields: map[string]*yang.Entry{
-					"config": {Name: "config"},
-					"state":  {Name: "state"},
-				},
-				path: []string{"", "s1", "outer-container", "inner-container"},
-			},
-			"/s1/outer-container/inner-container/config": {
-				name: "config",
-				fields: map[string]*yang.Entry{
-					"inner-leaf": {Name: "inner-leaf", Type: &yang.YangType{Kind: yang.Ystring}},
-				},
-				path: []string{"", "s1", "outer-container", "inner-container", "config"},
-			},
-			"/s1/outer-container/inner-container/state": {
-				name: "state",
-				fields: map[string]*yang.Entry{
-					"inner-state-leaf": {Name: "inner-state-leaf", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "s1", "outer-container", "inner-container", "state"},
-			},
-		},
-	}, {
-		name: "container with choice around leaves",
-		in: []*yang.Entry{
-			{
-				Name: "module",
-				Dir: map[string]*yang.Entry{
-					"top-container": {
-						Name: "top-container",
-						Dir: map[string]*yang.Entry{
-							"config": {
-								Name:   "config",
-								Parent: &yang.Entry{Name: "top-container"},
-								Dir: map[string]*yang.Entry{
-									"choice-node": {
-										Name: "choice-node",
-										Kind: yang.ChoiceEntry,
-										Dir: map[string]*yang.Entry{
-											"case-one": {
-												Name: "case-one",
-												Kind: yang.CaseEntry,
-												Parent: &yang.Entry{
-													Name:   "choice-node",
-													Kind:   yang.ChoiceEntry,
-													Parent: &yang.Entry{Name: "config", Parent: &yang.Entry{Name: "top-container"}},
-												},
-												Dir: map[string]*yang.Entry{
-													"leaf-one": {Name: "leaf-one", Type: &yang.YangType{Kind: yang.Yint8}},
-												},
-											},
-											"case-two": {
-												Name: "case-two",
-												Kind: yang.CaseEntry,
-												Parent: &yang.Entry{
-													Name:   "choice-node",
-													Kind:   yang.ChoiceEntry,
-													Parent: &yang.Entry{Name: "config", Parent: &yang.Entry{Name: "top-container"}},
-												},
-												Dir: map[string]*yang.Entry{
-													"leaf-two": {Name: "leaf-two", Type: &yang.YangType{Kind: yang.Yint8}},
-												},
-											},
-										},
-									},
-								},
-							},
-							"state": {
-								Name:   "state",
-								Parent: &yang.Entry{Name: "top-container"},
-								Dir: map[string]*yang.Entry{
-									"choice-node": {
-										Name: "choice-node",
-										Kind: yang.ChoiceEntry,
-										Dir: map[string]*yang.Entry{
-											"case-one": {
-												Name: "case-one",
-												Kind: yang.CaseEntry,
-												Parent: &yang.Entry{
-													Name:   "choice-node",
-													Kind:   yang.ChoiceEntry,
-													Parent: &yang.Entry{Name: "state", Parent: &yang.Entry{Name: "top-container"}},
-												},
-												Dir: map[string]*yang.Entry{"leaf-one": {Name: "leaf-one"}},
-											},
-											"case-two": {
-												Name: "case-two",
-												Kind: yang.CaseEntry,
-												Parent: &yang.Entry{
-													Name:   "choice-node",
-													Kind:   yang.ChoiceEntry,
-													Parent: &yang.Entry{Name: "state", Parent: &yang.Entry{Name: "top-container"}},
-												},
-												Dir: map[string]*yang.Entry{"leaf-two": {Name: "leaf-two"}},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		wantCompress: map[string]yangStruct{
-			"/top-container": {
-				name: "top-container",
-				fields: map[string]*yang.Entry{
-					"leaf-one": {Name: "leaf-one", Type: &yang.YangType{Kind: yang.Yint8}},
-					"leaf-two": {Name: "leaf-two", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "top-container"},
-			},
-		},
-		wantUncompress: map[string]yangStruct{
-			"/top-container": {
-				name: "top-container",
-				fields: map[string]*yang.Entry{
-					"config": {Name: "config"},
-					"state":  {Name: "state"},
-				},
-				path: []string{"", "top-container"},
-			},
-			"/top-container/config": {
-				name: "config",
-				fields: map[string]*yang.Entry{
-					"leaf-one": {Name: "leaf-one", Type: &yang.YangType{Kind: yang.Yint8}},
-					"leaf-two": {Name: "leaf-two", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "top-container", "config"},
-			},
-			"/top-container/state": {
-				name: "state",
-				fields: map[string]*yang.Entry{
-					"leaf-one": {Name: "leaf-one", Type: &yang.YangType{Kind: yang.Yint8}},
-					"leaf-two": {Name: "leaf-two", Type: &yang.YangType{Kind: yang.Yint8}},
-				},
-				path: []string{"", "top-container", "state"},
-			},
-		},
-	}, {
-		name: "schema with list",
-		in: []*yang.Entry{
-			{
-				Name: "container",
-				Dir: map[string]*yang.Entry{
-					"list": {
-						Name:     "list",
-						Parent:   &yang.Entry{Name: "container", Parent: &yang.Entry{Name: "module"}},
-						Key:      "key",
-						ListAttr: &yang.ListAttr{},
-						Dir: map[string]*yang.Entry{
-							"key": {
-								Name: "key",
-								Type: &yang.YangType{Kind: yang.Yleafref, Path: "../config/key"},
-								Parent: &yang.Entry{
-									Name: "list",
-									Parent: &yang.Entry{
-										Name: "container",
-										Parent: &yang.Entry{
-											Name: "module",
-										},
-									},
-								},
-							},
-							"config": {
-								Name:   "config",
-								Parent: &yang.Entry{Name: "list", Parent: &yang.Entry{Name: "container", Parent: &yang.Entry{Name: "module"}}},
-								Dir: map[string]*yang.Entry{
-									"key": {
-										Name: "key",
-										Type: &yang.YangType{Kind: yang.Ystring},
-										Parent: &yang.Entry{
-											Name: "config",
-											Parent: &yang.Entry{
-												Name: "list",
-												Parent: &yang.Entry{
-													Name: "container",
-													Parent: &yang.Entry{
-														Name: "module",
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-							"state": {
-								Name:   "state",
-								Parent: &yang.Entry{Name: "list", Parent: &yang.Entry{Name: "container", Parent: &yang.Entry{Name: "module"}}},
-
-								Dir: map[string]*yang.Entry{
-									"key": {
-										Name: "key",
-										Type: &yang.YangType{Kind: yang.Ystring},
-										Parent: &yang.Entry{
-											Name: "config",
-											Parent: &yang.Entry{
-												Name: "list",
-												Parent: &yang.Entry{
-													Name: "container",
-													Parent: &yang.Entry{
-														Name: "module",
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-				Parent: &yang.Entry{Name: "module"},
-			},
-		},
-		wantCompress: map[string]yangStruct{
-			"/module/container/list": {
-				name: "list",
-				fields: map[string]*yang.Entry{
-					"key": {Name: "key", Type: &yang.YangType{Kind: yang.Ystring}},
-				},
-			},
-		},
-		wantUncompress: map[string]yangStruct{
-			"/module/container/list": {
-				name: "list",
-				fields: map[string]*yang.Entry{
-					"key":    {Name: "key", Type: &yang.YangType{Kind: yang.Yleafref}},
-					"config": {Name: "config"},
-					"state":  {Name: "state"},
-				},
-			},
-			"/module/container/list/config": {
-				name: "config",
-				fields: map[string]*yang.Entry{
-					"key": {Name: "key", Type: &yang.YangType{Kind: yang.Ystring}},
-				},
-			},
-			"/module/container/list/state": {
-				name: "state",
-				fields: map[string]*yang.Entry{
-					"key": {Name: "key", Type: &yang.YangType{Kind: yang.Ystring}},
-				},
-			},
-		},
-	}, {
-		name: "schema with choice around container",
-		in: []*yang.Entry{
-			{
-				Name: "container",
-				Dir: map[string]*yang.Entry{
-					"choice-node": {
-						Name:   "choice-node",
-						Kind:   yang.ChoiceEntry,
-						Parent: &yang.Entry{Name: "container"},
-						Dir: map[string]*yang.Entry{
-							"case-one": {
-								Name:   "case-one",
-								Kind:   yang.CaseEntry,
-								Parent: &yang.Entry{Name: "choice-node", Parent: &yang.Entry{Name: "container"}},
-								Dir: map[string]*yang.Entry{
-									"second-container": {
-										Name: "second-container",
-										Parent: &yang.Entry{
-											Name: "case-one",
-											Parent: &yang.Entry{
-												Name:   "choice-node",
-												Parent: &yang.Entry{Name: "container"},
-											},
-										},
-										Dir: map[string]*yang.Entry{
-											"config": {
-												Name: "config",
-												Parent: &yang.Entry{
-													Name: "second-container",
-													Parent: &yang.Entry{
-														Name:   "case-one",
-														Parent: &yang.Entry{Name: "choice-node", Parent: &yang.Entry{Name: "container"}},
-													},
-												},
-												Dir: map[string]*yang.Entry{"leaf-one": {Name: "leaf-one"}},
-											},
-										},
-									},
-								},
-							},
-							"case-two": {
-								Name:   "case-two",
-								Kind:   yang.CaseEntry,
-								Parent: &yang.Entry{Name: "choice-node", Parent: &yang.Entry{Name: "container"}},
-								Dir: map[string]*yang.Entry{
-									"third-container": {
-										Name: "third-container",
-										Parent: &yang.Entry{
-											Name:   "case-two",
-											Parent: &yang.Entry{Name: "choice-node", Parent: &yang.Entry{Name: "container"}},
-										},
-										Dir: map[string]*yang.Entry{
-											"config": {
-												Name: "config",
-												Parent: &yang.Entry{
-													Name: "third-container",
-													Parent: &yang.Entry{
-														Name:   "case-two",
-														Parent: &yang.Entry{Name: "choice-node", Parent: &yang.Entry{Name: "container"}},
-													},
-												},
-												Dir: map[string]*yang.Entry{"leaf-two": {Name: "leaf-two"}},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		wantCompress: map[string]yangStruct{
-			"/container": {
-				name: "container",
-				fields: map[string]*yang.Entry{
-					"second-container": {Name: "second-container"},
-					"third-container":  {Name: "third-container"},
-				},
-			},
-			// Since these are schema paths then we still have the choice node's name
-			// here, we need to check that the processing recursed correctly into the
-			// container.
-			"/container/choice-node/case-one/second-container": {
-				name:   "second-container",
-				fields: map[string]*yang.Entry{"leaf-one": {Name: "leaf-one"}},
-			},
-			"/container/choice-node/case-two/third-container": {
-				name:   "third-container",
-				fields: map[string]*yang.Entry{"leaf-two": {Name: "leaf-two"}},
-			},
-		},
-		wantUncompress: map[string]yangStruct{
-			"/container": {
-				name: "container",
-				fields: map[string]*yang.Entry{
-					"second-container": {Name: "second-container"},
-					"third-container":  {Name: "third-container"},
-				},
-			},
-			"/container/choice-node/case-one/second-container": {
-				name:   "second-container",
-				fields: map[string]*yang.Entry{"config": {Name: "config"}},
-			},
-			"/container/choice-node/case-two/third-container": {
-				name:   "third-container",
-				fields: map[string]*yang.Entry{"config": {Name: "config"}},
-			},
-			"/container/choice-node/case-one/second-container/config": {
-				name:   "config",
-				fields: map[string]*yang.Entry{"leaf-one": {Name: "leaf-one"}},
-			},
-			"/container/choice-node/case-two/third-container/config": {
-				name:   "config",
-				fields: map[string]*yang.Entry{"leaf-two": {Name: "leaf-two"}},
-			},
-		},
-	}}
-
-	for _, tt := range tests {
-		for compress, expected := range map[bool]map[string]yangStruct{true: tt.wantCompress, false: tt.wantUncompress} {
-			cg := NewYANGCodeGenerator(&GeneratorConfig{
-				CompressOCPaths: compress,
-			})
-
-			st, err := buildSchemaTree(tt.in)
-			if err != nil {
-				t.Errorf("%s: buildSchemaTree(%v), got unexpected err: %v", tt.name, tt.in, err)
-				continue
-			}
-			cg.state.schematree = st
-
-			structs := make(map[string]*yang.Entry)
-			enums := make(map[string]*yang.Entry)
-
-			for _, inc := range tt.in {
-				cg.findMappableEntities(inc, structs, enums)
-			}
-
-			structDefs, errs := cg.state.buildGoStructDefinitions(structs, cg.Config.CompressOCPaths, cg.Config.GenerateFakeRoot)
-			if len(errs) > 0 {
-				t.Errorf("%s buildStructDefinitions(CompressOCPaths: %v): could not build struct defs: %v", tt.name, compress, errs)
-				continue
-			}
-
-			for name, gostruct := range structDefs {
-				expstr, ok := expected[name]
-				if !ok {
-					t.Errorf("%s buildStructDefinitions(CompressOCPaths: %v): could not find expected struct %s, got: %v, want: %v",
-						tt.name, compress, name, structDefs, expected)
-					continue
-				}
-
-				for fieldk, fieldv := range expstr.fields {
-					cmpfield, ok := gostruct.fields[fieldk]
-					if !ok {
-						t.Errorf("%s buildStructDefinitions(CompressOCPaths: %v): could not find expected field %s in %s, got: %v",
-							tt.name, compress, fieldk, name, gostruct.fields)
-						continue
-					}
-
-					if fieldv.Name != cmpfield.Name {
-						t.Errorf("%s buildStructDefinitions(CompressOCPaths: %v): field %s of %s did not have expected name, got: %v, want: %v",
-							tt.name, compress, fieldk, name, fieldv.Name, cmpfield.Name)
-					}
-
-					if fieldv.Type != nil && cmpfield.Type != nil {
-						if fieldv.Type.Kind != cmpfield.Type.Kind {
-							t.Errorf("%s buildStructDefinitions(CompressOCPaths: %v): field %s of %s did not have expected type got: %s, want: %s",
-								tt.name, compress, fieldk, name, fieldv.Type.Kind, cmpfield.Type.Kind)
-						}
-					}
-
-				}
-
-				if len(expstr.path) > 0 && !reflect.DeepEqual(expstr.path, gostruct.path) {
-					t.Errorf("%s (%v): %s did not have matching path, got: %v, want: %v", tt.name, compress, name, expstr.path, gostruct.path)
+					t.Errorf("%s: findMappableEntities(CompressOCPaths: %v): enum %s was not found in %v\n", tt.name, compress, e, enumOut)
 				}
 			}
 		}
@@ -996,9 +433,24 @@ func TestSimpleStructs(t *testing.T) {
 		inFiles:             []string{filepath.Join(TestRoot, "testdata/structs/openconfig-simple.yang")},
 		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/structs/openconfig-simple-no-compress.formatted-txt"),
 	}, {
-		name:                "simple openconfig test, with a list",
-		inFiles:             []string{filepath.Join(TestRoot, "testdata/structs/openconfig-withlist.yang")},
-		inConfig:            GeneratorConfig{CompressOCPaths: true},
+		name:    "OpenConfig schema test - with annotations",
+		inFiles: []string{filepath.Join(TestRoot, "testdata/structs/openconfig-simple.yang")},
+		inConfig: GeneratorConfig{
+			GoOptions: GoOpts{
+				AddAnnotationFields: true,
+				AnnotationPrefix:    "☃",
+			},
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "openconfig-simple-annotations.formatted-txt"),
+	}, {
+		name:    "OpenConfig schema test - list and associated method (rename, new)",
+		inFiles: []string{filepath.Join(TestRoot, "testdata/structs/openconfig-withlist.yang")},
+		inConfig: GeneratorConfig{
+			CompressOCPaths: true,
+			GoOptions: GoOpts{
+				GenerateRenameMethod: true,
+			},
+		},
 		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/structs/openconfig-withlist.formatted-txt"),
 	}, {
 		name:                "simple openconfig test, with a list that has an enumeration key",
@@ -1110,99 +562,230 @@ func TestSimpleStructs(t *testing.T) {
 		},
 		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/schema/openconfig-options-explicit.formatted-txt"),
 		wantSchemaFile:      filepath.Join(TestRoot, "testdata/schema/openconfig-options-explicit-schema.json"),
+	}, {
+		name:    "module with entities at the root",
+		inFiles: []string{filepath.Join(TestRoot, "testdata/structs/root-entities.yang")},
+		inConfig: GeneratorConfig{
+			Caller:           "testcase",
+			FakeRootName:     "fakeroot",
+			GenerateFakeRoot: true,
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/structs/root-entities.formatted-txt"),
+	}, {
+		name:                "module with empty leaf",
+		inFiles:             []string{filepath.Join(TestRoot, "testdata/structs/empty.yang")},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/structs/empty.formatted-txt"),
+	}, {
+		name:    "module with excluded modules",
+		inFiles: []string{filepath.Join(TestRoot, "testdata/structs/excluded-module.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			FakeRootName:     "office",
+			ExcludeModules:   []string{"excluded-module-two"},
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata/structs/excluded-module.formatted-txt"),
+	}, {
+		name:    "module with excluded config false",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			ExcludeState:     true,
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false-uncompressed.formatted-txt"),
+	}, {
+		name:    "module with excluded config false - with compression",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			ExcludeState:     true,
+			CompressOCPaths:  true,
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false-compressed.formatted-txt"),
+	}, {
+		name:    "module with getters, delete and append methods",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "structs", "openconfig-list-enum-key.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			GoOptions: GoOpts{
+				GenerateAppendMethod: true,
+				GenerateGetters:      true,
+				GenerateDeleteMethod: true,
+			},
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "openconfig-list-enum-key.getters-append.formatted-txt"),
+	}, {
+		name:    "module with excluded state, with RO list, path compression on",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "structs", "exclude-state-ro-list.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			CompressOCPaths:  true,
+			ExcludeState:     true,
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "exclude-state-ro-list.formatted-txt"),
+	}, {
+		name:           "enumeration behaviour - resolution across submodules and grouping re-use within union",
+		inFiles:        []string{filepath.Join(TestRoot, "testdata", "structs", "enum-module.yang")},
+		inIncludePaths: []string{filepath.Join(TestRoot, "testdata", "structs")},
+		inConfig: GeneratorConfig{
+			CompressOCPaths: true,
+		},
+		wantStructsCodeFile: filepath.Join(TestRoot, "testdata", "structs", "enum-module.formatted-txt"),
 	}}
 
 	for _, tt := range tests {
-		// Set defaults within the supplied configuration for these tests.
-		if tt.inConfig.Caller == "" {
-			// Set the name of the caller explicitly to avoid issues when
-			// the unit tests are called by external test entities.
-			tt.inConfig.Caller = "codegen-tests"
-		}
-		tt.inConfig.StoreRawSchema = true
+		t.Run(tt.name, func(t *testing.T) {
+			genCode := func() (*GeneratedGoCode, string, map[string]interface{}) {
+				// Set defaults within the supplied configuration for these tests.
+				if tt.inConfig.Caller == "" {
+					// Set the name of the caller explicitly to avoid issues when
+					// the unit tests are called by external test entities.
+					tt.inConfig.Caller = "codegen-tests"
+				}
+				tt.inConfig.StoreRawSchema = true
 
+				cg := NewYANGCodeGenerator(&tt.inConfig)
+
+				gotGeneratedCode, err := cg.GenerateGoCode(tt.inFiles, tt.inIncludePaths)
+				if err != nil && !tt.wantErr {
+					t.Fatalf("%s: cg.GenerateCode(%v, %v): Config: %v, got unexpected error: %v, want: nil", tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, err)
+				}
+
+				// Write all the received structs into a single file such that
+				// it can be compared to the received file.
+				var gotCode bytes.Buffer
+				fmt.Fprint(&gotCode, gotGeneratedCode.CommonHeader)
+				fmt.Fprint(&gotCode, gotGeneratedCode.OneOffHeader)
+				for _, gotStruct := range gotGeneratedCode.Structs {
+					fmt.Fprint(&gotCode, gotStruct.String())
+				}
+
+				for _, gotEnum := range gotGeneratedCode.Enums {
+					fmt.Fprint(&gotCode, gotEnum)
+				}
+
+				// Write generated enumeration map out.
+				fmt.Fprint(&gotCode, gotGeneratedCode.EnumMap)
+
+				var gotJSON map[string]interface{}
+				if tt.inConfig.GenerateJSONSchema {
+					// Write the schema byte array out.
+					fmt.Fprint(&gotCode, gotGeneratedCode.JSONSchemaCode)
+					fmt.Fprint(&gotCode, gotGeneratedCode.EnumTypeMap)
+
+					if err := json.Unmarshal(gotGeneratedCode.RawJSONSchema, &gotJSON); err != nil {
+						t.Fatalf("%s: json.Unmarshal(..., %v), could not unmarshal received JSON: %v", tt.name, gotGeneratedCode.RawJSONSchema, err)
+					}
+				}
+				return gotGeneratedCode, gotCode.String(), gotJSON
+			}
+
+			gotGeneratedCode, gotCode, gotJSON := genCode()
+
+			if tt.wantSchemaFile != "" {
+				wantSchema, rferr := ioutil.ReadFile(tt.wantSchemaFile)
+				if rferr != nil {
+					t.Fatalf("%s: ioutil.ReadFile(%q) error: %v", tt.name, tt.wantSchemaFile, rferr)
+				}
+
+				var wantJSON map[string]interface{}
+				if err := json.Unmarshal(wantSchema, &wantJSON); err != nil {
+					t.Fatalf("%s: json.Unmarshal(..., [contents of %s]), could not unmarshal golden JSON file: %v", tt.name, tt.wantSchemaFile, err)
+				}
+
+				if !reflect.DeepEqual(gotJSON, wantJSON) {
+					diff, _ := testutil.GenerateUnifiedDiff(string(gotGeneratedCode.RawJSONSchema), string(wantSchema))
+					t.Fatalf("%s: GenerateGoCode(%v, %v), Config: %v, did not return correct JSON (file: %v), diff: \n%s", tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, tt.wantSchemaFile, diff)
+				}
+			}
+
+			wantCode, rferr := ioutil.ReadFile(tt.wantStructsCodeFile)
+			if rferr != nil {
+				t.Fatalf("%s: ioutil.ReadFile(%q) error: %v", tt.name, tt.wantStructsCodeFile, rferr)
+			}
+
+			if gotCode != string(wantCode) {
+				// Use difflib to generate a unified diff between the
+				// two code snippets such that this is simpler to debug
+				// in the test output.
+				diff, _ := testutil.GenerateUnifiedDiff(gotCode, string(wantCode))
+				t.Errorf("%s: GenerateGoCode(%v, %v), Config: %v, did not return correct code (file: %v), diff:\n%s",
+					tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, tt.wantStructsCodeFile, diff)
+			}
+
+			for i := 0; i < deflakeRuns; i++ {
+				_, gotAttempt, _ := genCode()
+				if gotAttempt != gotCode {
+					diff, _ := testutil.GenerateUnifiedDiff(gotCode, gotAttempt)
+					t.Fatalf("flaky code generation, diff:\n%s", diff)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateErrs(t *testing.T) {
+	tests := []struct {
+		name                  string
+		inFiles               []string
+		inPath                []string
+		inConfig              GeneratorConfig
+		wantGoOK              bool
+		wantGoErrSubstring    string
+		wantProtoOK           bool
+		wantProtoErrSubstring string
+		wantSameErrSubstring  bool
+	}{{
+		name:                 "missing YANG file",
+		inFiles:              []string{filepath.Join(TestRoot, "testdata", "errors", "doesnt-exist.yang")},
+		wantGoErrSubstring:   "no such file",
+		wantSameErrSubstring: true,
+	}, {
+		name:                 "bad YANG file",
+		inFiles:              []string{filepath.Join(TestRoot, "testdata", "errors", "bad-module.yang")},
+		wantGoErrSubstring:   "syntax error",
+		wantSameErrSubstring: true,
+	}, {
+		name:                 "missing import due to path",
+		inFiles:              []string{filepath.Join(TestRoot, "testdata", "errors", "missing-import.yang")},
+		wantGoErrSubstring:   "no such module",
+		wantSameErrSubstring: true,
+	}, {
+		name:        "import satisfied due to path",
+		inFiles:     []string{filepath.Join(TestRoot, "testdata", "errors", "missing-import.yang")},
+		inPath:      []string{filepath.Join(TestRoot, "testdata", "errors", "subdir")},
+		wantGoOK:    true,
+		wantProtoOK: true,
+	}}
+
+	for _, tt := range tests {
 		cg := NewYANGCodeGenerator(&tt.inConfig)
 
-		gotGeneratedCode, err := cg.GenerateGoCode(tt.inFiles, tt.inIncludePaths)
-		if err != nil && !tt.wantErr {
-			t.Errorf("%s: cg.GenerateCode(%v, %v): Config: %v, got unexpected error: %v, want: nil",
-				tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, err)
-			continue
-		}
-
-		wantCode, rferr := ioutil.ReadFile(tt.wantStructsCodeFile)
-		if rferr != nil {
-			t.Errorf("%s: ioutil.ReadFile(%q) error: %v", tt.name, tt.wantStructsCodeFile, rferr)
-			continue
-		}
-
-		// Write all the received structs into a single file such that
-		// it can be compared to the received file.
-		var gotCode bytes.Buffer
-		fmt.Fprint(&gotCode, gotGeneratedCode.Header)
-		for _, gotStruct := range gotGeneratedCode.Structs {
-			fmt.Fprintf(&gotCode, gotStruct)
-		}
-
-		for _, gotEnum := range gotGeneratedCode.Enums {
-			fmt.Fprintf(&gotCode, gotEnum)
-		}
-
-		// Write generated enumeration map out.
-		fmt.Fprintf(&gotCode, gotGeneratedCode.EnumMap)
-
-		if tt.inConfig.GenerateJSONSchema {
-			// Write the schema byte array out.
-			fmt.Fprintf(&gotCode, gotGeneratedCode.JSONSchemaCode)
-
-			wantSchema, rferr := ioutil.ReadFile(tt.wantSchemaFile)
-			if rferr != nil {
-				t.Errorf("%s: ioutil.ReadFile(%q) error: %v", tt.name, tt.wantSchemaFile, err)
-				continue
-			}
-
-			var gotJSON map[string]interface{}
-			if err := json.Unmarshal(gotGeneratedCode.RawJSONSchema, &gotJSON); err != nil {
-				t.Errorf("%s: json.Unmarshal(..., %v), could not unmarshal received JSON: %v", tt.name, gotGeneratedCode.RawJSONSchema, err)
-				continue
-			}
-
-			var wantJSON map[string]interface{}
-			if err := json.Unmarshal(wantSchema, &wantJSON); err != nil {
-				t.Errorf("%s: json.Unmarshal(..., [contents of %s]), could not unmarshal golden JSON file: %v", tt.name, tt.wantSchemaFile, err)
-				continue
-			}
-
-			if !reflect.DeepEqual(gotJSON, wantJSON) {
-				diff := difflib.UnifiedDiff{
-					A:        difflib.SplitLines(string(gotGeneratedCode.RawJSONSchema)),
-					B:        difflib.SplitLines(string(wantSchema)),
-					FromFile: "got",
-					ToFile:   "want",
-					Context:  3,
-					Eol:      "\n",
-				}
-				diffr, _ := difflib.GetUnifiedDiffString(diff)
-				t.Errorf("%s: GenerateGoCode(%v, %v), Config: %v, did not return correct JSON (file: %v), diff: \n%s", tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, tt.wantSchemaFile, diffr)
+		_, goErr := cg.GenerateGoCode(tt.inFiles, tt.inPath)
+		switch {
+		case tt.wantGoOK && goErr != nil:
+			t.Errorf("%s: cg.GenerateGoCode(%v, %v): got unexpected error, got: %v, want: nil", tt.name, tt.inFiles, tt.inPath, goErr)
+		case tt.wantGoOK:
+		default:
+			if diff := errdiff.Substring(goErr, tt.wantGoErrSubstring); diff != "" {
+				t.Errorf("%s: cg.GenerateGoCode(%v, %v): %v", tt.name, tt.inFiles, tt.inPath, diff)
 			}
 		}
 
-		if gotCode.String() != string(wantCode) {
-			// Use difflib to generate a unified diff between the
-			// two code snippets such that this is simpler to debug
-			// in the test output.
-			diff := difflib.UnifiedDiff{
-				A:        difflib.SplitLines(gotCode.String()),
-				B:        difflib.SplitLines(string(wantCode)),
-				FromFile: "got",
-				ToFile:   "want",
-				Context:  3,
-				Eol:      "\n",
-			}
-			diffr, _ := difflib.GetUnifiedDiffString(diff)
-			t.Errorf("%s: GenerateGoCode(%v, %v), Config: %v, did not return correct code (file: %v), diff:\n%s",
-				tt.name, tt.inFiles, tt.inIncludePaths, tt.inConfig, tt.wantStructsCodeFile, diffr)
+		if tt.wantSameErrSubstring {
+			tt.wantProtoErrSubstring = tt.wantGoErrSubstring
 		}
+
+		_, protoErr := cg.GenerateProto3(tt.inFiles, tt.inPath)
+		switch {
+		case tt.wantProtoOK && protoErr != nil:
+			t.Errorf("%s: cg.GenerateProto3(%v, %v): got unexpected error, got: %v, want: nil", tt.name, tt.inFiles, tt.inPath, protoErr)
+		case tt.wantProtoOK:
+		default:
+			if diff := errdiff.Substring(protoErr, tt.wantProtoErrSubstring); diff != "" {
+				t.Errorf("%s: cg.GenerateProto3(%v, %v): %v", tt.name, tt.inFiles, tt.inPath, diff)
+			}
+		}
+
 	}
 }
 
@@ -1210,15 +793,17 @@ func TestFindRootEntries(t *testing.T) {
 	tests := []struct {
 		name                       string
 		inStructs                  map[string]*yang.Entry
+		inRootElems                []*yang.Entry
 		inRootName                 string
 		wantCompressRootChildren   []string
 		wantUncompressRootChildren []string
 	}{{
-		name: "directory at root, compress paths on",
+		name: "directory at root",
 		inStructs: map[string]*yang.Entry{
 			"/foo": {
 				Name: "foo",
 				Dir:  map[string]*yang.Entry{},
+				Kind: yang.DirectoryEntry,
 				Parent: &yang.Entry{
 					Name: "module",
 				},
@@ -1226,6 +811,7 @@ func TestFindRootEntries(t *testing.T) {
 			"/foo/bar": {
 				Name: "bar",
 				Dir:  map[string]*yang.Entry{},
+				Kind: yang.DirectoryEntry,
 				Parent: &yang.Entry{
 					Name: "foo",
 					Parent: &yang.Entry{
@@ -1237,43 +823,556 @@ func TestFindRootEntries(t *testing.T) {
 		inRootName:                 "fakeroot",
 		wantCompressRootChildren:   []string{"foo"},
 		wantUncompressRootChildren: []string{"foo"},
+	}, {
+		name: "directory and leaf at root",
+		inStructs: map[string]*yang.Entry{
+			"/foo": {
+				Name: "foo",
+				Dir:  map[string]*yang.Entry{},
+				Kind: yang.DirectoryEntry,
+				Parent: &yang.Entry{
+					Name: "module",
+				},
+			},
+		},
+		inRootElems: []*yang.Entry{{
+			Name: "foo",
+			Dir:  map[string]*yang.Entry{},
+			Kind: yang.DirectoryEntry,
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		}, {
+			Name: "leaf",
+			Type: &yang.YangType{
+				Kind: yang.Ystring,
+			},
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		}},
+		inRootName:                 "fakeroot",
+		wantCompressRootChildren:   []string{"foo", "leaf"},
+		wantUncompressRootChildren: []string{"foo", "leaf"},
 	}}
 
 	for _, tt := range tests {
-		for compress, wantChildren := range map[bool][]string{true: tt.wantCompressRootChildren, false: tt.wantUncompressRootChildren} {
-			cg := NewYANGCodeGenerator(&GeneratorConfig{
-				CompressOCPaths: compress,
-				FakeRootName:    tt.inRootName,
-			})
-
-			if err := cg.createFakeRoot(tt.inStructs); err != nil {
-				t.Errorf("%s: cg.createFakeRoot(%v), CompressOCPaths: %v, got unexpected error: %v", tt.name, tt.inStructs, compress, err)
-				continue
-			}
-
-			rootElem, ok := tt.inStructs["/"]
-			if !ok {
-				t.Errorf("%s: cg.createFakeRoot(%v), CompressOCPaths: %v, could not find root element", tt.name, tt.inStructs, compress)
-				continue
-			}
-
-			gotChildren := map[string]bool{}
-			for n := range rootElem.Dir {
-				gotChildren[n] = true
-			}
-
-			for _, ch := range wantChildren {
-				if _, ok := rootElem.Dir[ch]; !ok {
-					t.Errorf("%s: cg.createFakeRoot(%v), CompressOCPaths: %v, could not find child %v in %v", tt.name, tt.inStructs, compress, ch, rootElem.Dir)
+		t.Run(tt.name, func(t *testing.T) {
+			for compress, wantChildren := range map[bool][]string{true: tt.wantCompressRootChildren, false: tt.wantUncompressRootChildren} {
+				if err := createFakeRoot(tt.inStructs, tt.inRootElems, tt.inRootName, compress); err != nil {
+					t.Errorf("cg.createFakeRoot(%v), CompressOCPaths: %v, got unexpected error: %v", tt.inStructs, compress, err)
+					continue
 				}
-				gotChildren[ch] = false
-			}
 
-			for ch, ok := range gotChildren {
-				if ok == true {
-					t.Errorf("%s: cg.findRootentries(%v), CompressOCPaths: %v, did not expect child %v", tt.name, tt.inStructs, compress, ch)
+				rootElem, ok := tt.inStructs["/"]
+				if !ok {
+					t.Errorf("cg.createFakeRoot(%v), CompressOCPaths: %v, could not find root element", tt.inStructs, compress)
+					continue
+				}
+
+				gotChildren := map[string]bool{}
+				for n := range rootElem.Dir {
+					gotChildren[n] = true
+				}
+
+				for _, ch := range wantChildren {
+					if _, ok := rootElem.Dir[ch]; !ok {
+						t.Errorf("cg.createFakeRoot(%v), CompressOCPaths: %v, could not find child %v in %v", tt.inStructs, compress, ch, rootElem.Dir)
+					}
+					gotChildren[ch] = false
+				}
+
+				for ch, ok := range gotChildren {
+					if ok == true {
+						t.Errorf("cg.findRootentries(%v), CompressOCPaths: %v, did not expect child %v", tt.inStructs, compress, ch)
+					}
 				}
 			}
+		})
+	}
+}
+
+func TestGenerateProto3(t *testing.T) {
+	tests := []struct {
+		name           string
+		inFiles        []string
+		inIncludePaths []string
+		inConfig       GeneratorConfig
+		// wantOutputFiles is a map keyed on protobuf package name with a path
+		// to the file that is expected for each package.
+		wantOutputFiles map[string]string
+		wantErr         bool
+	}{{
+		name:    "simple protobuf test with compression",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.yang")},
+		inConfig: GeneratorConfig{
+			CompressOCPaths: true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig":        filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.compress.parent.formatted-txt"),
+			"openconfig.parent": filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.compress.parent.child.formatted-txt"),
+		},
+	}, {
+		name:    "simple protobuf test without compression",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.yang")},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_test_a":              filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.nocompress.formatted-txt"),
+			"openconfig.proto_test_a.parent":       filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.nocompress.parent.formatted-txt"),
+			"openconfig.proto_test_a.parent.child": filepath.Join(TestRoot, "testdata", "proto", "proto-test-a.nocompress.parent.child.formatted-txt"),
+		},
+	}, {
+		name:     "yang schema with a list",
+		inFiles:  []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-b.yang")},
+		inConfig: GeneratorConfig{CompressOCPaths: true},
+		wantOutputFiles: map[string]string{
+			"openconfig":        filepath.Join(TestRoot, "testdata", "proto", "proto-test-b.compress.formatted-txt"),
+			"openconfig.device": filepath.Join(TestRoot, "testdata", "proto", "proto-test-b.compress.device.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with simple enumerations",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-c.yang")},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_test_c":              filepath.Join(TestRoot, "testdata", "proto", "proto-test-c.proto-test-c.formatted-txt"),
+			"openconfig.proto_test_c.entity":       filepath.Join(TestRoot, "testdata", "proto", "proto-test-c.proto-test-c.entity.formatted-txt"),
+			"openconfig.proto_test_c.elists":       filepath.Join(TestRoot, "testdata", "proto", "proto-test-c.proto-test-c.elists.formatted-txt"),
+			"openconfig.proto_test_c.elists.elist": filepath.Join(TestRoot, "testdata", "proto", "proto-test-c.proto-test-c.elists.elist.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with identityref and enumerated typedef, compression off",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-d.yang")},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_test_d":      filepath.Join(TestRoot, "testdata", "proto", "proto-test-d.uncompressed.proto-test-d.formatted-txt"),
+			"openconfig.proto_test_d.test": filepath.Join(TestRoot, "testdata", "proto", "proto-test-d.uncompressed.proto-test-d.test.formatted-txt"),
+			"openconfig.enums":             filepath.Join(TestRoot, "testdata", "proto", "proto-test-d.uncompressed.enums.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with unions",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.yang")},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_test_e":                filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.formatted-txt"),
+			"openconfig.proto_test_e.test":           filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.test.formatted-txt"),
+			"openconfig.proto_test_e.foos":           filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.foos.formatted-txt"),
+			"openconfig.proto_test_e.foos.foo":       filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.foos.foo.formatted-txt"),
+			"openconfig.proto_test_e.bars":           filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.bars.formatted-txt"),
+			"openconfig.enums":                       filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.enums.formatted-txt"),
+			"openconfig.proto_test_e.animals":        filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.animals.formatted-txt"),
+			"openconfig.proto_test_e.animals.animal": filepath.Join(TestRoot, "testdata", "proto", "proto-test-e.uncompressed.proto-test-e.animals.animal.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with anydata",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-anydata-test.yang")},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_anydata_test":   filepath.Join(TestRoot, "testdata", "proto", "proto_anydata_test.formatted-txt"),
+			"openconfig.proto_anydata_test.e": filepath.Join(TestRoot, "testdata", "proto", "proto_anydata_test.e.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with path annotations",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-test-f.yang")},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateSchemaPaths: true,
+			},
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig.proto_test_f":     filepath.Join(TestRoot, "testdata", "proto", "proto_test_f.uncompressed.proto_test_f.formatted-txt"),
+			"openconfig.proto_test_f.a":   filepath.Join(TestRoot, "testdata", "proto", "proto_test_f.uncompressed.proto_test_f.a.formatted-txt"),
+			"openconfig.proto_test_f.a.c": filepath.Join(TestRoot, "testdata", "proto", "proto_test_f.uncompressed.proto_test_f.a.c.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with fake root, path compression and union list key",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.yang")},
+		inConfig: GeneratorConfig{
+			CompressOCPaths:  true,
+			GenerateFakeRoot: true,
+			ProtoOptions: ProtoOpts{
+				AnnotateSchemaPaths: true,
+			},
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig":                filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.compressed.openconfig.formatted-txt"),
+			"openconfig.routing_policy": filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.compressed.openconfig.routing_policy.formatted-txt"),
+		},
+	}, {
+		name:    "yang schema with fakeroot, and union list key",
+		inFiles: []string{filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.yang")},
+		inConfig: GeneratorConfig{
+			GenerateFakeRoot: true,
+			ProtoOptions: ProtoOpts{
+				AnnotateSchemaPaths: true,
+			},
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig":                                                     filepath.Join(TestRoot, "testdata", "proto", "proto-union-list_key.uncompressed.openconfig.formatted-txt"),
+			"openconfig.proto_union_list_key":                                filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.uncompressed.openconfig.proto_union_list_key.formatted-txt"),
+			"openconfig.proto_union_list_key.routing_policy":                 filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.uncompressed.openconfig.proto_union_list_key.routing_policy.formatted-txt"),
+			"openconfig.proto_union_list_key.routing_policy.policies":        filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.uncompressed.openconfig.proto_union_list_key.routing_policy.policies.formatted-txt"),
+			"openconfig.proto_union_list_key.routing_policy.policies.policy": filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.uncompressed.openconfig.proto_union_list_key.routing_policy.policies.policy.formatted-txt"),
+			"openconfig.proto_union_list_key.routing_policy.sets":            filepath.Join(TestRoot, "testdata", "proto", "proto-union-list-key.uncompressed.openconfig.proto_union_list_key.routing_policy.sets.formatted-txt"),
+		},
+	}, {
+		name:     "enums: yang schema with various types of enums with underscores",
+		inFiles:  []string{filepath.Join(TestRoot, "testdata", "proto", "proto-enums.yang")},
+		inConfig: GeneratorConfig{},
+		wantOutputFiles: map[string]string{
+			"openconfig.enums":       filepath.Join(TestRoot, "testdata", "proto", "proto-enums.enums.formatted-txt"),
+			"openconfig.proto_enums": filepath.Join(TestRoot, "testdata", "proto", "proto-enums.formatted-txt"),
+		},
+	}, {
+		name: "enums: yang schema with identity that adds to previous module",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "proto-enums.yang"),
+			filepath.Join(TestRoot, "testdata", "proto", "proto-enums-addid.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames: true,
+			},
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig.enums":       filepath.Join(TestRoot, "testdata", "proto", "proto-enums-addid.enums.formatted-txt"),
+			"openconfig.proto_enums": filepath.Join(TestRoot, "testdata", "proto", "proto-enums-addid.formatted-txt"),
+		},
+	}, {
+		name: "yang schema with nested messages requested - uncompressed with fakeroot",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "nested-messages.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+				NestedMessages:      true,
+			},
+			GenerateFakeRoot: true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig":                 filepath.Join(TestRoot, "testdata", "proto", "nested-messages.openconfig.formatted-txt"),
+			"openconfig.enums":           filepath.Join(TestRoot, "testdata", "proto", "nested-messages.enums.formatted-txt"),
+			"openconfig.nested_messages": filepath.Join(TestRoot, "testdata", "proto", "nested-messages.nested_messages.formatted-txt"),
+		},
+	}, {
+		name: "yang schema with nested messages - compressed with fakeroot",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "nested-messages.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+				NestedMessages:      true,
+			},
+			CompressOCPaths:  true,
+			GenerateFakeRoot: true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig.enums": filepath.Join(TestRoot, "testdata", "proto", "nested-messages.compressed.enums.formatted-txt"),
+			"openconfig":       filepath.Join(TestRoot, "testdata", "proto", "nested-messages.compressed.nested_messages.formatted-txt"),
+		},
+	}, {
+		name: "yang schema with a leafref key to a union with enumeration",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "union-list-key.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+				NestedMessages:      true,
+			},
+			GenerateFakeRoot: true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig.enums":          filepath.Join(TestRoot, "testdata", "proto", "union-list-key.enums.formatted-txt"),
+			"openconfig.union_list_key": filepath.Join(TestRoot, "testdata", "proto", "union-list-key.union_list_key.formatted-txt"),
+			"openconfig":                filepath.Join(TestRoot, "testdata", "proto", "union-list-key.formatted-txt"),
+		},
+	}, {
+		name: "protobuf generation with excluded read only fields - compressed",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+				NestedMessages:      true,
+			},
+			GenerateFakeRoot: true,
+			ExcludeState:     true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig":                         filepath.Join(TestRoot, "testdata", "proto", "excluded-config-false.compressed.formatted-txt"),
+			"openconfig.openconfig_config_false": filepath.Join(TestRoot, "testdata", "proto", "excluded-config-false.config_false.compressed.formatted-txt"),
+		},
+	}, {
+		name: "protobuf generation with excluded read only fields - compressed",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "structs", "openconfig-config-false.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+				NestedMessages:      true,
+			},
+			GenerateFakeRoot: true,
+			CompressOCPaths:  true,
+			ExcludeState:     true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig": filepath.Join(TestRoot, "testdata", "proto", "excluded-config-false.uncompressed.formatted-txt"),
+		},
+	}, {
+		name: "protobuf generation with leafref to a module excluded by the test",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "cross-ref-target.yang"),
+			filepath.Join(TestRoot, "testdata", "proto", "cross-ref-src.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				NestedMessages: true,
+			},
+			ExcludeModules: []string{"cross-ref-target"},
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig.cross_ref_src": filepath.Join(TestRoot, "testdata", "proto", "cross-ref-src.formatted-txt"),
+		},
+	}, {
+		name: "multimod with fakeroot and nested",
+		inFiles: []string{
+			filepath.Join(TestRoot, "testdata", "proto", "fakeroot-multimod-one.yang"),
+			filepath.Join(TestRoot, "testdata", "proto", "fakeroot-multimod-two.yang"),
+		},
+		inConfig: GeneratorConfig{
+			ProtoOptions: ProtoOpts{
+				NestedMessages:      true,
+				AnnotateEnumNames:   true,
+				AnnotateSchemaPaths: true,
+			},
+			GenerateFakeRoot: true,
+			CompressOCPaths:  true,
+		},
+		wantOutputFiles: map[string]string{
+			"openconfig": filepath.Join(TestRoot, "testdata", "proto", "fakeroot-multimod.formatted-txt"),
+		},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			sortedPkgNames := func(pkgs map[string]string) []string {
+				wantPkgs := []string{}
+				for k := range tt.wantOutputFiles {
+					wantPkgs = append(wantPkgs, k)
+				}
+				sort.Strings(wantPkgs)
+				return wantPkgs
+			}
+
+			genCode := func() *GeneratedProto3 {
+				if tt.inConfig.Caller == "" {
+					// Override the caller if it is not set, to ensure that test
+					// output is deterministic.
+					tt.inConfig.Caller = "codegen-tests"
+				}
+
+				cg := NewYANGCodeGenerator(&tt.inConfig)
+				gotProto, err := cg.GenerateProto3(tt.inFiles, tt.inIncludePaths)
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("cg.GenerateProto3(%v, %v), config: %v: got unexpected error: %v", tt.inFiles, tt.inIncludePaths, tt.inConfig, err)
+				}
+
+				if tt.wantErr || err != nil {
+					return nil
+				}
+
+				return gotProto
+			}
+
+			gotProto := genCode()
+
+			allCode := bytes.Buffer{}
+
+			seenPkg := map[string]bool{}
+			for n := range gotProto.Packages {
+				seenPkg[n] = false
+			}
+
+			protoPkgs := func(m map[string]Proto3Package) []string {
+				a := []string{}
+				for k := range m {
+					a = append(a, k)
+				}
+				return a
+			}
+
+			wantPkgs := sortedPkgNames(tt.wantOutputFiles)
+			for _, pkg := range wantPkgs {
+				wantFile := tt.wantOutputFiles[pkg]
+				wantCode, err := ioutil.ReadFile(wantFile)
+				if err != nil {
+					t.Errorf("%s: ioutil.ReadFile(%v): could not read file for package %s", tt.name, wantFile, pkg)
+					return
+				}
+
+				gotPkg, ok := gotProto.Packages[pkg]
+				if !ok {
+					t.Fatalf("%s: cg.GenerateProto3(%v, %v): did not find expected package %s in output, got: %#v, want key: %v", tt.name, tt.inFiles, tt.inIncludePaths, pkg, protoPkgs(gotProto.Packages), pkg)
+				}
+
+				// Mark this package as having been seen.
+				seenPkg[pkg] = true
+
+				// Write the returned struct out to a buffer to compare with the
+				// testdata file.
+				var gotCodeBuf bytes.Buffer
+				fmt.Fprintf(&gotCodeBuf, gotPkg.Header)
+
+				for _, gotMsg := range gotPkg.Messages {
+					fmt.Fprintf(&gotCodeBuf, "%s\n", gotMsg)
+				}
+
+				for _, gotEnum := range gotPkg.Enums {
+					fmt.Fprintf(&gotCodeBuf, "%s", gotEnum)
+				}
+
+				allCode.WriteString(gotCodeBuf.String())
+
+				if diff := pretty.Compare(gotCodeBuf.String(), string(wantCode)); diff != "" {
+					if diffl, _ := testutil.GenerateUnifiedDiff(gotCodeBuf.String(), string(wantCode)); diffl != "" {
+						diff = diffl
+					}
+					t.Fatalf("%s: cg.GenerateProto3(%v, %v) for package %s, did not get expected code (code file: %v), diff(-got,+want):\n%s", tt.name, tt.inFiles, tt.inIncludePaths, pkg, wantFile, diff)
+				}
+			}
+
+			for pkg, seen := range seenPkg {
+				if !seen {
+					t.Errorf("%s: cg.GenerateProto3(%v, %v) did not test received package %v", tt.name, tt.inFiles, tt.inIncludePaths, pkg)
+				}
+			}
+
+			for i := 0; i < deflakeRuns; i++ {
+				got := genCode()
+				var gotCodeBuf bytes.Buffer
+
+				wantPkgs := sortedPkgNames(tt.wantOutputFiles)
+				for _, pkg := range wantPkgs {
+					gotPkg, ok := got.Packages[pkg]
+					if !ok {
+						t.Fatalf("%s: cg.GenerateProto3(%v, %v): did not find expected package %s in output, got: %#v, want key: %v", tt.name, tt.inFiles, tt.inIncludePaths, pkg, protoPkgs(gotProto.Packages), pkg)
+					}
+					fmt.Fprintf(&gotCodeBuf, gotPkg.Header)
+					for _, gotMsg := range gotPkg.Messages {
+						fmt.Fprintf(&gotCodeBuf, "%s\n", gotMsg)
+					}
+					for _, gotEnum := range gotPkg.Enums {
+						fmt.Fprintf(&gotCodeBuf, "%s", gotEnum)
+					}
+				}
+
+				if diff := pretty.Compare(gotCodeBuf.String(), allCode.String()); diff != "" {
+					diff, _ = testutil.GenerateUnifiedDiff(gotCodeBuf.String(), allCode.String())
+					t.Fatalf("flaky code generation iter: %d, diff(-got,+want):\n%s", i, diff)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateFakeRoot(t *testing.T) {
+	tests := []struct {
+		name            string
+		inStructs       map[string]*yang.Entry
+		inRootElems     []*yang.Entry
+		inRootName      string
+		inCompressPaths bool
+		wantRoot        *yang.Entry
+		wantErr         bool
+	}{{
+		name: "simple root",
+		inStructs: map[string]*yang.Entry{
+			"/module/foo": {
+				Name: "foo",
+				Kind: yang.DirectoryEntry,
+				Parent: &yang.Entry{
+					Name: "module",
+				},
+			},
+		},
+		inRootElems: []*yang.Entry{{
+			Name: "foo",
+			Kind: yang.DirectoryEntry,
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		}, {
+			Name: "bar",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+			Type: &yang.YangType{Kind: yang.Ystring},
+		}},
+		inRootName:      "",
+		inCompressPaths: false,
+		wantRoot: &yang.Entry{
+			Name: defaultRootName,
+			Kind: yang.DirectoryEntry,
+			Dir: map[string]*yang.Entry{
+				"foo": {
+					Name: "foo",
+					Kind: yang.DirectoryEntry,
+					Parent: &yang.Entry{
+						Name: "module",
+					},
+				},
+				"bar": {
+					Name: "bar",
+					Parent: &yang.Entry{
+						Name: "module",
+					},
+					Type: &yang.YangType{Kind: yang.Ystring},
+				},
+			},
+			Node: &yang.Value{
+				Name: rootElementNodeName,
+			},
+		},
+	}, {
+		name: "overlapping root entries",
+		inStructs: map[string]*yang.Entry{
+			"/module1/foo": {
+				Name: "foo",
+				Kind: yang.DirectoryEntry,
+				Parent: &yang.Entry{
+					Name: "module1",
+				},
+			},
+			"/module2/foo": {
+				Name: "foo",
+				Kind: yang.DirectoryEntry,
+				Parent: &yang.Entry{
+					Name: "module2",
+				},
+			},
+		},
+		inRootName: "name",
+		wantErr:    true,
+	}}
+
+	for _, tt := range tests {
+		err := createFakeRoot(tt.inStructs, tt.inRootElems, tt.inRootName, tt.inCompressPaths)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("%s: createFakeRoot(%v, %v, %s, %v): did not get expected error, got: %s, wantErr: %v", tt.name, tt.inStructs, tt.inRootElems, tt.inRootName, tt.inCompressPaths, err, tt.wantErr)
+			continue
+		}
+
+		if err != nil {
+			continue
+		}
+
+		if diff := pretty.Compare(tt.inStructs["/"], tt.wantRoot); diff != "" {
+			t.Errorf("%s: createFakeRoot(%v, %v, %s, %v): did not get expected root struct, diff(-got,+want):\n%s", tt.name, tt.inStructs, tt.inRootElems, tt.inRootName, tt.inCompressPaths, diff)
 		}
 	}
 }

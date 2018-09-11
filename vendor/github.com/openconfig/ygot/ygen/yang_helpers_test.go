@@ -28,6 +28,7 @@ func TestYangHelperChecks(t *testing.T) {
 		name                string
 		inEntry             *yang.Entry
 		wantDir             bool
+		wantContainer       bool
 		wantList            bool
 		wantRoot            bool
 		wantConfigState     bool
@@ -40,12 +41,14 @@ func TestYangHelperChecks(t *testing.T) {
 		name: "valid directory node",
 		inEntry: &yang.Entry{
 			Name: "container",
+			Kind: yang.DirectoryEntry,
 			Dir: map[string]*yang.Entry{
 				"child": {},
 			},
 			Parent: &yang.Entry{},
 		},
 		wantDir:             true,
+		wantContainer:       true,
 		wantCompressedValid: true,
 		wantHasOnlyChild:    true,
 	}, {
@@ -284,7 +287,7 @@ func TestYangPath(t *testing.T) {
 			t.Errorf("%s: joinPath(%v) = %s, want %s", tt.name, tt.inSplitPath, got, tt.wantStringPath)
 		}
 
-		if len(tt.wantStrippedPath) > 0 {
+		if tt.wantStrippedPath != "" {
 			var s []string
 			for _, p := range tt.inSplitPath {
 				s = append(s, removePrefix(p))
@@ -574,6 +577,192 @@ func TestResolveLeafrefTargetType(t *testing.T) {
 
 		if diff := pretty.Compare(got, tt.want); diff != "" {
 			t.Errorf("%s: resolveLeafrefTargetPath(%v, %v): did not get expected entry, diff(-got,+want):\n%s", tt.name, tt.inPath, tt.inContextEntry, diff)
+		}
+	}
+}
+
+func TestDirectEntryChild(t *testing.T) {
+	tests := []struct {
+		name            string
+		inParent        *yang.Entry
+		inChild         *yang.Entry
+		inCompressPaths bool
+		want            bool
+	}{{
+		name: "simple entry with no path compression",
+		inParent: &yang.Entry{
+			Name: "parent",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inChild: &yang.Entry{
+			Name: "child",
+			Parent: &yang.Entry{
+				Name: "parent",
+				Parent: &yang.Entry{
+					Name: "module",
+				},
+			},
+		},
+		want: true,
+	}, {
+		name: "non-child entry with path compression",
+		inParent: &yang.Entry{
+			Name: "item-one",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inChild: &yang.Entry{
+			Name: "item-two",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+	}, {
+		name: "child path length less than parent length",
+		inParent: &yang.Entry{
+			Name: "item-one",
+			Parent: &yang.Entry{
+				Name: "container",
+				Parent: &yang.Entry{
+					Name: "module",
+				},
+			},
+		},
+		inChild: &yang.Entry{
+			Name: "item-two",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+	}, {
+		name: "compress paths on, child path length too short",
+		inParent: &yang.Entry{
+			Name: "item-one",
+			Parent: &yang.Entry{
+				Name: "container",
+				Parent: &yang.Entry{
+					Name: "module",
+				},
+			},
+		},
+		inChild: &yang.Entry{
+			Name:     "item-two",
+			Dir:      map[string]*yang.Entry{},
+			ListAttr: &yang.ListAttr{},
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inCompressPaths: true,
+	}, {
+		name: "compress paths on, child path length is too long",
+		inParent: &yang.Entry{
+			Name: "item-one",
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inChild: &yang.Entry{
+			Name:     "item-three",
+			Dir:      map[string]*yang.Entry{},
+			ListAttr: &yang.ListAttr{},
+			Parent: &yang.Entry{
+				Name: "item-two",
+				Parent: &yang.Entry{
+					Name: "item-one",
+					Parent: &yang.Entry{
+						Name: "module",
+					},
+				},
+			},
+		},
+		inCompressPaths: true,
+	}, {
+		name: "compress paths on, child is not a list",
+		inParent: &yang.Entry{
+			Name: "parent-nl",
+			Kind: yang.DirectoryEntry,
+			Dir:  map[string]*yang.Entry{},
+			Parent: &yang.Entry{
+				Name: "module-nl",
+			},
+		},
+		inChild: &yang.Entry{
+			Name: "child",
+			Kind: yang.DirectoryEntry,
+			Dir:  map[string]*yang.Entry{},
+			Parent: &yang.Entry{
+				Name: "parent-nl",
+				Parent: &yang.Entry{
+					Name: "module-nl",
+				},
+			},
+		},
+		inCompressPaths: true,
+		want:            true,
+	}, {
+		name: "compress paths on, parent does not have an only child",
+		inParent: &yang.Entry{
+			Name: "parent",
+			Kind: yang.DirectoryEntry,
+			Dir: map[string]*yang.Entry{
+				"surrounding-container": {Name: "child"},
+				"childtwo":              {Name: "childtwo"},
+			},
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inChild: &yang.Entry{
+			Name:     "child",
+			Kind:     yang.DirectoryEntry,
+			Dir:      map[string]*yang.Entry{},
+			ListAttr: &yang.ListAttr{},
+			Parent: &yang.Entry{
+				Name: "surrounding-container",
+				Parent: &yang.Entry{
+					Name: "parent",
+					Parent: &yang.Entry{
+						Name: "module",
+					},
+				},
+			},
+		},
+		inCompressPaths: true,
+	}, {
+		name: "compress paths on, container in state container",
+		inParent: &yang.Entry{
+			Name: "parent",
+			Kind: yang.DirectoryEntry,
+			Parent: &yang.Entry{
+				Name: "module",
+			},
+		},
+		inChild: &yang.Entry{
+			Name: "counters",
+			Kind: yang.DirectoryEntry,
+			Parent: &yang.Entry{
+				Name: "state",
+				Kind: yang.DirectoryEntry,
+				Dir:  map[string]*yang.Entry{},
+				Parent: &yang.Entry{
+					Name: "parent",
+					Parent: &yang.Entry{
+						Name: "module",
+					},
+				},
+			},
+		},
+		inCompressPaths: true,
+		want:            true,
+	}}
+
+	for _, tt := range tests {
+		if got := isDirectEntryChild(tt.inParent, tt.inChild, tt.inCompressPaths); got != tt.want {
+			t.Errorf("%s: isDirectEntryChild(%v, %v, %v): did determine child status correctly, got: %v, want: %v", tt.name, tt.inParent, tt.inChild, tt.inCompressPaths, got, tt.want)
 		}
 	}
 }

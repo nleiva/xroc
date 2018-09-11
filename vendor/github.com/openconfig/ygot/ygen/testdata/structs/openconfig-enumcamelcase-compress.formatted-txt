@@ -12,7 +12,9 @@ Imported modules were sourced from:
 package ocstructs
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/openconfig/ygot/ygot"
 )
@@ -23,10 +25,15 @@ import (
 // []byte in reflection).
 type Binary []byte
 
+// YANGEmpty is a type that is used for fields that have a YANG type of
+// empty. It is used such that empty fields can be distinguished from boolean fields
+// in the generated code.
+type YANGEmpty bool
+
 // Foo represents the /openconfig-enumcamelcase/foo YANG schema element.
 type Foo struct {
-	Bar	E_OpenConfigCamelCase_OpenconfigEnumcamelcase_Bar	`path:"foo/bar" module:"openconfig-enumcamelcase"`
-	Baz	E_OpenConfigCamelCase_BAT	`path:"foo/baz" module:"openconfig-enumcamelcase"`
+	Bar	E_OpenConfigCamelCase_OpenconfigEnumcamelcase_Bar	`path:"bar" module:"openconfig-enumcamelcase"`
+	Baz	E_OpenConfigCamelCase_BAT	`path:"baz" module:"openconfig-enumcamelcase"`
 }
 
 // IsYANGGoStruct ensures that Foo implements the yang.GoStruct

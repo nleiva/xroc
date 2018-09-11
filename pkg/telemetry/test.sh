@@ -1,1 +1,0 @@
-./generator -output_file=telemetry.go -package_name=octelemetry -generate_fakeroot -fakeroot_name=Telemetry openconfig-telemetry.yang

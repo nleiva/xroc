@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/openconfig/goyang/pkg/yang"
-
 	"github.com/openconfig/ygot/ygot"
 )
 
@@ -26,18 +25,25 @@ type Case1Leaf1ChoiceStruct struct {
 	Case1Leaf1 *string `path:"case1-leaf1"`
 }
 
-func (c *Case1Leaf1ChoiceStruct) IsYANGGoStruct() {}
+func (*Case1Leaf1ChoiceStruct) IsYANGGoStruct() {}
 
 type Leaf1ContainerStruct struct {
 	Leaf1Name *string `path:"config/leaf1|leaf1"`
 }
 
-func (c *Leaf1ContainerStruct) IsYANGGoStruct() {}
+func (*Leaf1ContainerStruct) IsYANGGoStruct() {}
 
 type EmptyContainerStruct struct {
 }
 
-func (c *EmptyContainerStruct) IsYANGGoStruct() {}
+func (*EmptyContainerStruct) IsYANGGoStruct() {}
+
+type FakeRootStruct struct {
+	LeafOne *string `path:"leaf-one"`
+	LeafTwo *string `path:"leaf-two"`
+}
+
+func (*FakeRootStruct) IsYANGGoStruct() {}
 
 func TestValidate(t *testing.T) {
 	leafSchema := &yang.Entry{Name: "leaf-schema", Kind: yang.LeafEntry, Type: &yang.YangType{Kind: yang.Ystring}}
@@ -111,11 +117,39 @@ func TestValidate(t *testing.T) {
 		LeafName *string `path:"leaf-name"`
 	}
 
+	fakerootSchema := &yang.Entry{
+		Name: "device",
+		Kind: yang.DirectoryEntry,
+		Annotation: map[string]interface{}{
+			"isFakeRoot": true,
+		},
+	}
+	fakerootSchema.Dir = map[string]*yang.Entry{
+		"leaf-one": {
+			Name: "leaf-one",
+			Kind: yang.LeafEntry,
+			Type: &yang.YangType{
+				Kind: yang.Ystring,
+			},
+			Parent: fakerootSchema,
+		},
+		"leaf-two": {
+			Name: "leaf-two",
+			Kind: yang.LeafEntry,
+			Type: &yang.YangType{
+				Kind: yang.Yleafref,
+				Path: "../leaf-one",
+			},
+			Parent: fakerootSchema,
+		},
+	}
+
 	tests := []struct {
 		desc    string
 		val     interface{}
 		schema  *yang.Entry
-		wantErr bool
+		opts    []ygot.ValidationOption
+		wantErr string
 	}{
 		{
 			desc:   "leaf",
@@ -128,6 +162,22 @@ func TestValidate(t *testing.T) {
 			val: &Leaf1ContainerStruct{
 				Leaf1Name: ygot.String("Leaf1Value"),
 			},
+		},
+		{
+			desc:   "fakeroot with leafref",
+			schema: fakerootSchema,
+			val: &FakeRootStruct{
+				LeafOne: ygot.String("one"),
+				LeafTwo: ygot.String("one"),
+			},
+		},
+		{
+			desc:   "fakeroot with leafref with missing data option",
+			schema: fakerootSchema,
+			val: &FakeRootStruct{
+				LeafTwo: ygot.String("two"),
+			},
+			opts: []ygot.ValidationOption{&LeafrefOptions{IgnoreMissingData: true}},
 		},
 		{
 			desc:   "empty container",
@@ -155,19 +205,21 @@ func TestValidate(t *testing.T) {
 			val:    &Case1Leaf1ChoiceStruct{Case1Leaf1: ygot.String("Case1Leaf1Value")},
 		},
 		{
-			desc:    "unsupported schema",
-			schema:  &yang.Entry{Kind: yang.DirectoryEntry},
-			val:     ygot.String(""),
-			wantErr: true,
+			desc:    "choice schema not allowed",
+			schema:  &yang.Entry{Kind: yang.ChoiceEntry, Name: "choice"},
+			val:     &EmptyContainerStruct{},
+			wantErr: `cannot pass choice schema choice to Validate`,
 		},
 	}
 
-	for _, test := range tests {
-		err := Validate(test.schema, test.val)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: Validate got error: %v, wanted error? %v", test.desc, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			errs := Validate(tt.schema, tt.val, tt.opts...)
+			if got, want := errs.String(), tt.wantErr; got != want {
+				t.Errorf("%s: Validate got error: %s, want error: %s", tt.desc, got, want)
+			}
+			testErrLog(t, tt.desc, errs)
+		})
 	}
 
 }

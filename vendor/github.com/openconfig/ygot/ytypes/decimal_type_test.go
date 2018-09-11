@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/openconfig/ygot/util"
 )
 
 const (
@@ -70,12 +71,14 @@ func TestValidateDecimalSchema(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateDecimalSchema(test.schema)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: validDecimalSchema(%v) got error: %v, wanted error? %v", test.desc, test.schema, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateDecimalSchema(tt.schema)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: validDecimalSchema(%v) got error: %v, want error? %v", tt.desc, tt.schema, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
 
@@ -133,12 +136,14 @@ func TestValidateDecimalType(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateDecimal(test.schema, test.val)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: validateDecimal(%v) got error: %v, wanted error? %v", test.desc, test.val, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateDecimal(tt.schema, tt.val)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: validateDecimal(%v) got error: %v, want error? %v", tt.desc, tt.val, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
 
@@ -239,7 +244,7 @@ func TestValidateDecimalValue(t *testing.T) {
 		{
 			desc: "ranges [-inf,-], [0,+]",
 			ranges: yang.YangRange{
-				yang.YRange{Min: YangMinNumber, Max: yang.FromFloat(-5.1)},
+				yang.YRange{Min: util.YangMinNumber, Max: yang.FromFloat(-5.1)},
 				yang.YRange{Min: yang.FromFloat(0), Max: yang.FromFloat(10.1)},
 			},
 			inValues:  []float64{tooLargeNegativeFloat, largestNegativeValidFloat, -100, -7, -5.1, 0, tooSmallFloat, 5, 10},
@@ -249,24 +254,26 @@ func TestValidateDecimalValue(t *testing.T) {
 			desc: "ranges [-,-], [0,+inf]",
 			ranges: yang.YangRange{
 				yang.YRange{Min: yang.FromFloat(-10.1), Max: yang.FromFloat(-5.1)},
-				yang.YRange{Min: yang.FromFloat(0), Max: YangMaxNumber},
+				yang.YRange{Min: yang.FromFloat(0), Max: util.YangMaxNumber},
 			},
 			inValues:  []float64{-10.1, -10.05, -7, -5.100001, -5.1, 0, tooSmallFloat, 5, 100, largestValidFloat, tooLargeFloat},
 			outValues: []float64{tooLargeNegativeFloat, largestNegativeValidFloat, -10.15, -5.0009, -0.0001},
 		},
 	}
 
-	for _, test := range tests {
-		for _, val := range test.inValues {
-			if err := validateDecimal(rangeToDecimalSchema(test.desc+"-schema", test.ranges), val); err != nil {
-				t.Errorf("%s: %v should be inside ranges %v", test.desc, val, test.ranges)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			for _, val := range tt.inValues {
+				if err := validateDecimal(rangeToDecimalSchema(tt.desc+"-schema", tt.ranges), val); err != nil {
+					t.Errorf("%s: %v should be inside ranges %v", tt.desc, val, tt.ranges)
+				}
 			}
-		}
-		for _, val := range test.outValues {
-			if err := validateDecimal(rangeToDecimalSchema(test.desc+"-schema", test.ranges), val); err == nil {
-				t.Errorf("%s: %v should be outside ranges %v", test.desc, val, test.ranges)
+			for _, val := range tt.outValues {
+				if err := validateDecimal(rangeToDecimalSchema(tt.desc+"-schema", tt.ranges), val); err == nil {
+					t.Errorf("%s: %v should be outside ranges %v", tt.desc, val, tt.ranges)
+				}
 			}
-		}
+		})
 	}
 }
 
@@ -303,11 +310,13 @@ func TestValidateDecimalSlice(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
-		err := validateDecimalSlice(test.schema, test.val)
-		if got, want := (err != nil), test.wantErr; got != want {
-			t.Errorf("%s: validateDecimal(%v) got error: %v, wanted error? %v", test.desc, test.val, err, test.wantErr)
-		}
-		testErrLog(t, test.desc, err)
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			err := validateDecimalSlice(tt.schema, tt.val)
+			if got, want := (err != nil), tt.wantErr; got != want {
+				t.Errorf("%s: validateDecimal(%v) got error: %v, want error? %v", tt.desc, tt.val, err, tt.wantErr)
+			}
+			testErrLog(t, tt.desc, err)
+		})
 	}
 }
