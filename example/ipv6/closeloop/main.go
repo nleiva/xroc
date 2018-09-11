@@ -154,7 +154,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to config %s: %v\n", r.IP, err)
 	} else {
-		fmt.Printf("\n%sTelemetry%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
+		fmt.Printf("\n1)\n%sTelemetry%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
 	}
 	id++
 
@@ -225,7 +225,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to config %s: %v\n", r.IP, err)
 	} else {
-		fmt.Printf("\n%sInterface%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
+		fmt.Printf("\n2)\n%sInterface%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
 	}
 	id++
 
@@ -309,7 +309,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to config %s: %v\n", r.IP, err)
 	} else {
-		fmt.Printf("\n%sBGP%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
+		fmt.Printf("\n3)\n%sBGP%s config applied on %s (Request ID: %v)\n", blue, white, r.IP, id)
 	}
 
 	// Pause

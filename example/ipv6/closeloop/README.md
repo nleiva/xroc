@@ -26,19 +26,22 @@ As described in the [bgp](../bgp/README.md), [interface](../interface/README.md)
 ```console
 $ go run main.go
 
-Telemetry config applied on 2001:420:2cff:1204::5502:2 (Request ID: 2989)
+1)
+Telemetry config applied on 2001:420:2cff:1204::5502:2 (Request ID: 1451)
 Press 'Enter' to continue...
 
-Interface config applied on 2001:420:2cff:1204::5502:2 (Request ID: 2990)
+2)
+Interface config applied on 2001:420:2cff:1204::5502:2 (Request ID: 1452)
 Press 'Enter' to continue...
 
-BGP config applied on 2001:420:2cff:1204::5502:2 (Request ID: 2991)
+3)
+BGP config applied on 2001:420:2cff:1204::5502:2 (Request ID: 1453)
 Press 'Enter' to continue...
 
 4)
 Receiving Telemetry from 2001:420:2cff:1204::5502:2 ->
 
-Neighbor: 2001:db8::11, Time: 18:57:19, State: ESTABLISHED
+Neighbor: 2001:db8::11, Time: 10:26:12, State: ESTABLISHED
 
 
                         Session ✅
