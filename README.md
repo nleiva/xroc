@@ -1,6 +1,6 @@
 # A collection of OpenConfig and Cisco IOS XR examples
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![BSD License](https://img.shields.io/pypi/l/Django.svg)](LICENSE)
 
 The goal of this repo is to provide a set of examples that illustrate how to program network elements using [OpenConfig](http://www.openconfig.net/) and [gRPC](https://grpc.io/). We will leverage different Open Source projects:
 
@@ -26,17 +26,20 @@ The goal of this repo is to provide a set of examples that illustrate how to pro
 
 The objective is to configure an interface (link) and bring up a BGP session, while setting up a BGP Neighbor Telemetry stream to track the current state of the BGP Finite State Machine. Check out the code [here](example/ipv6/closeloop/main.go)
 
-__Steps__
-1. Configure a Streaming Telemetry subscription using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
-2. Configure the Peer link (interface) using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
-3. Configure a BGP neighbor using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
-4. Subscribe to a Telemetry stream to learn about BGP Neighbor status with [xrgrpc](https://nleiva.github.io/xrgrpc/).
+#### Steps
 
+1. Configure a Streaming Telemetry subscription using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
+
+2. Configure the Peer link (interface) using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
+
+3. Configure a BGP neighbor using [ygot](https://github.com/openconfig/ygot) and [xrgrpc](https://nleiva.github.io/xrgrpc/).
+
+4. Subscribe to a Telemetry stream to learn about BGP Neighbor status with [xrgrpc](https://nleiva.github.io/xrgrpc/).
 
    ![oc-config-validate](static/images/closeloop.svg)
 
-
 ## Tutorials
+
 - [Programming IOS-XR with gRPC and Go](https://xrdocs.github.io/programmability/tutorials/2017-08-04-programming-ios-xr-with-grpc-and-go/).
 - [Validate the intent of network config changes](https://xrdocs.github.io/programmability/tutorials/2017-08-14-validate-the-intent-of-network-config-changes/).
-- [Programming Network Devices with gRPC and OpenConfig](https://goo.gl/P9Zsvj)
+- [Programming Network Devices with gRPC and OpenConfig](https://goo.gl/dMZxd2)
