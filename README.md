@@ -1,6 +1,7 @@
 # A collection of OpenConfig and Cisco IOS XR examples
 
 [![BSD License](https://img.shields.io/pypi/l/Django.svg)](LICENSE)
+[![published](https://static.production.devnetcloud.com/codeexchange/assets/images/devnet-published.svg)](https://developer.cisco.com/codeexchange/github/repo/nleiva/xroc)
 
 The goal of this repo is to provide a set of examples that illustrate how to program network elements using [OpenConfig](http://www.openconfig.net/) and [gRPC](https://grpc.io/). We will leverage different Open Source projects:
 
